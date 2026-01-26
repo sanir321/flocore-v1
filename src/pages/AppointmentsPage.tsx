@@ -15,7 +15,9 @@ import {
     Plus,
     ChevronLeft,
     ChevronRight,
-    List
+    List,
+    Filter,
+    X
 } from 'lucide-react'
 import {
     format,
@@ -63,6 +65,9 @@ export default function AppointmentsPage() {
     const [members, setMembers] = useState<Member[]>([])
     const [selectedMembers, setSelectedMembers] = useState<string[]>([])
     const [isAddOpen, setIsAddOpen] = useState(false)
+    const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+    const [filterShow, setFilterShow] = useState('All')
+    const [filterDateRange, setFilterDateRange] = useState({ start: new Date(), end: addDays(new Date(), 7) })
     const { toast } = useToast()
     const { workspace, loading: workspaceLoading } = useWorkspace()
 
@@ -101,10 +106,15 @@ export default function AppointmentsPage() {
         // Real-time subscription for new bookings
         const channel = supabase
             .channel('appointments-updates')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'appointments' },
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'appointments',
+                filter: `workspace_id=eq.${workspace.id}`
+            },
                 (payload) => {
                     // Refresh the list
-                    if (workspace.id) refreshAppointments(workspace.id)
+                    refreshAppointments(workspace.id)
 
                     // Send notification
                     const newAppt = payload.new as any
@@ -133,13 +143,12 @@ export default function AppointmentsPage() {
                 scheduled_at:start_time,
                 duration_minutes:metadata->duration_minutes,
                 status,
-                booked_by,
+                booked_by:booked_by,
                 google_event_id,
                 contact:contacts(name, phone, email)
             `)
             .eq('workspace_id', wsId)
-            .neq('status', 'cancelled') // Assuming we hide cancelled by default or filter differently? 
-            // Actually, keep cancelled for list view filtering
+            // .neq('status', 'cancelled') // Cancelled are kept for list filtering
             .order('start_time', { ascending: true })
 
         if (data) {
@@ -202,7 +211,7 @@ export default function AppointmentsPage() {
             }
 
             // 2. Create Appointment
-            const { error } = await supabase.from('appointments').insert({
+            const { error: apptError } = await supabase.from('appointments').insert({
                 workspace_id: workspaceId,
                 title,
                 start_time: startDateTime,
@@ -224,56 +233,86 @@ export default function AppointmentsPage() {
     }
 
     const handleCopyLink = () => {
-        // Generate a simple message or link
-        const link = `https://cal.com/book/${workspaceId}` // Placeholder or use real public page if exists
+        const link = window.location.origin + `/book/${workspaceId}`
         navigator.clipboard.writeText(link)
-        toast({ title: "Copied", description: "Booking link copied to clipboard." })
+            .then(() => toast({ title: "Copied", description: "Booking link copied to clipboard." }))
+            .catch(() => toast({ title: "Error", description: "Failed to copy link", variant: "destructive" }))
     }
 
     const handleCancel = async (appointment: Appointment) => {
-        if (!appointment.google_event_id || !workspaceId) return
+        if (!workspaceId) return
 
         try {
-            const { error } = await api.calendarAction({
-                action: 'cancel_appointment',
-                workspace_id: workspaceId,
-                params: { event_id: appointment.google_event_id }
-            })
+            // Optimistic Update
+            setAppointments(prev => prev.map(a => a.id === appointment.id ? { ...a, status: 'cancelled' } : a))
 
-            if (!error) {
-                toast({ title: "Cancelled", description: "Appointment cancelled successfully." })
-                setAppointments(prev => prev.map(a => a.id === appointment.id ? { ...a, status: 'cancelled' } : a))
+            // Cancel on Google if needed
+            if (appointment.google_event_id) {
+                await api.calendarAction({
+                    action: 'cancel_appointment',
+                    workspace_id: workspaceId,
+                    params: { event_id: appointment.google_event_id }
+                })
             } else {
-                throw new Error('Failed to cancel')
+                // Local Cancel Only
+                await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', appointment.id)
             }
+            toast({ title: "Cancelled", description: "Appointment cancelled successfully." })
+
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" })
+            // Rollback
+            refreshAppointments(workspaceId)
         }
     }
 
     // --- 3. FILTER LOGIC ---
     const filteredAppointments = appointments.filter(apt => {
         // Filter by Member (booked_by logic)
-        // If 'human' -> Owner (me). If 'ai' -> AI Agent.
-        const bookerId = (apt as any).booked_by === 'ai' ? 'ai' : members[0]?.id // Fallback to owner for 'human'
+        const bookerId = (apt as any).booked_by === 'ai' ? 'ai' : workspace.owner_id
 
-        // If we don't strictly track booker -> owner ID, we approximate.
-        return selectedMembers.includes(bookerId) || selectedMembers.includes('me') // Loose logic: Show all if 'me' is selected for manual ones
+        // Filter Logic
+        const matchesMember = selectedMembers.includes(bookerId) || ((apt as any).booked_by === 'human' && selectedMembers.some(m => m !== 'ai'))
+        const matchesStatus = filterShow === 'All' ? true : (filterShow === 'Upcoming' ? apt.status !== 'cancelled' : apt.status === 'cancelled')
+
+        return matchesMember && matchesStatus
     })
 
     if (loading) return <FlowCoreLoader />
 
     return (
-        <div className="flex h-screen overflow-hidden bg-background">
+        <div className="flex h-full overflow-hidden bg-background relative">
+            {/* MOBILE FILTER TOGGLE */}
+            <div className="md:hidden absolute top-4 left-4 z-20">
+                <Button variant="outline" size="sm" onClick={() => setMobileFiltersOpen(true)} className="gap-2 bg-background/95 backdrop-blur">
+                    <Filter className="h-4 w-4" /> Filters
+                </Button>
+            </div>
+
+            {/* SIDEBAR OVERLAY */}
+            {mobileFiltersOpen && (
+                <div className="md:hidden fixed inset-0 z-30 bg-black/50 backdrop-blur-sm" onClick={() => setMobileFiltersOpen(false)} />
+            )}
+
             {/* SIDEBAR */}
-            <div className="w-64 border-r p-6 flex flex-col gap-6 bg-card/30">
+            <div className={`
+                fixed md:static inset-y-0 left-0 z-40 w-64 bg-card/95 md:bg-card/30 border-r p-6 flex flex-col gap-6 transition-transform duration-300 ease-in-out
+                ${mobileFiltersOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+            `}>
+                <div className="flex items-center justify-between md:hidden mb-2">
+                    <span className="font-semibold">Filters & Views</span>
+                    <Button variant="ghost" size="icon" onClick={() => setMobileFiltersOpen(false)}>
+                        <X className="h-4 w-4" />
+                    </Button>
+                </div>
+
                 <div>
-                    <h2 className="text-lg font-semibold mb-4">Appointments</h2>
+                    <h2 className="text-lg font-semibold mb-4 hidden md:block">Appointments</h2>
                     <div className="flex flex-col gap-1">
-                        <Button variant={view === 'list' ? 'secondary' : 'ghost'} className="justify-start" onClick={() => setView('list')}>
+                        <Button variant={view === 'list' ? 'secondary' : 'ghost'} className="justify-start" onClick={() => { setView('list'); setMobileFiltersOpen(false); }}>
                             <List className="h-4 w-4 mr-2" /> Appointments
                         </Button>
-                        <Button variant={view === 'calendar' ? 'secondary' : 'ghost'} className="justify-start" onClick={() => setView('calendar')}>
+                        <Button variant={view === 'calendar' ? 'secondary' : 'ghost'} className="justify-start" onClick={() => { setView('calendar'); setMobileFiltersOpen(false); }}>
                             <CalendarIcon className="h-4 w-4 mr-2" /> Calendar
                         </Button>
                     </div>
@@ -370,7 +409,7 @@ export default function AppointmentsPage() {
 
 function AppointmentsListView({ appointments, handleCancel, handleCopyLink, openAddModal }: any) {
     return (
-        <div className="p-8 h-full overflow-auto">
+        <div className="p-4 md:p-8 h-full overflow-auto pt-16 md:pt-8">
             <div className="flex items-center justify-between mb-6">
                 <h1 className="text-2xl font-bold">Appointments</h1>
                 <div className="flex gap-2">
@@ -464,18 +503,19 @@ function AppointmentsCalendarView({ appointments, currentDate, setCurrentDate }:
                     <div className="border-b border-r py-2"></div>
                     {days.map(d => <div key={d.toISOString()} className="border-b border-r py-3 text-center sticky top-0 bg-white z-10">{format(d, 'EEE d')}</div>)}
                     {hours.map(h => (
-                        <>
-                            <div key={h} className="border-r border-b h-[60px] text-xs text-right pr-2 pt-2">{h > 12 ? h - 12 : h} {h >= 12 ? 'PM' : 'AM'}</div>
-                            {days.map(d => (
-                                <div key={d.toISOString() + h} className="border-r border-b h-[60px] relative">
-                                    {weekAppointments.filter((a: any) => isSameDay(parseISO(a.scheduled_at), d) && getHours(parseISO(a.scheduled_at)) === h).map((a: any) => (
-                                        <div key={a.id} className="absolute bg-primary/10 border-l-4 border-primary rounded-r text-xs p-1 overflow-hidden z-10" style={getAppointmentStyle(a)}>
-                                            {a.title}
-                                        </div>
-                                    ))}
-                                </div>
-                            ))}
-                        </>
+                        import {Fragment} from 'react' as any // Just using Fragment
+                    <div key={h} className="contents">
+                        <div className="border-r border-b h-[60px] text-xs text-right pr-2 pt-2">{h > 12 ? h - 12 : h} {h >= 12 ? 'PM' : 'AM'}</div>
+                        {days.map(d => (
+                            <div key={d.toISOString() + h} className="border-r border-b h-[60px] relative">
+                                {weekAppointments.filter((a: any) => isSameDay(parseISO(a.scheduled_at), d) && getHours(parseISO(a.scheduled_at)) === h).map((a: any) => (
+                                    <div key={a.id} className="absolute bg-primary/10 border-l-4 border-primary rounded-r text-xs p-1 overflow-hidden z-10" style={getAppointmentStyle(a)}>
+                                        {a.title}
+                                    </div>
+                                ))}
+                            </div>
+                        ))}
+                    </div>
                     ))}
                 </div>
             </div>

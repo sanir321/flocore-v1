@@ -259,9 +259,9 @@ export default function Step3AgentSetup({ data }: Step3Props) {
 
             {/* Header (Only on Selection) */}
             {viewState === 'SELECTION' && (
-                <div className="flex w-full max-w-6xl mx-auto items-center justify-between mb-8 px-8 relative">
-                    <div className="text-left space-y-4 max-w-sm z-20">
-                        <h1 className="text-5xl font-bold tracking-tight text-white">
+                <div className="flex flex-col md:flex-row w-full max-w-6xl mx-auto items-center justify-between mb-8 px-4 md:px-8 relative z-20">
+                    <div className="text-center md:text-left space-y-4 max-w-sm mb-8 md:mb-0">
+                        <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white">
                             Your first agent
                         </h1>
                         <p className="text-lg text-zinc-500">
@@ -270,14 +270,14 @@ export default function Step3AgentSetup({ data }: Step3Props) {
                     </div>
 
                     {/* Carousel */}
-                    <div className="relative w-[600px] h-[450px] perspective-[1000px]">
+                    <div className="relative w-full max-w-[320px] md:max-w-[600px] h-[450px] perspective-[1000px] mx-auto">
 
                         {/* Navigation Arrows */}
-                        <button onClick={handlePrev} className="absolute -left-4 top-1/2 -translate-y-1/2 z-30 w-12 h-12 rounded-full bg-[#1A1A1A]/80 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 hover:scale-110 transition-all backdrop-blur-sm">
-                            <ChevronLeft className="w-6 h-6" />
+                        <button onClick={handlePrev} className="absolute left-0 top-1/2 -translate-y-1/2 z-30 w-10 h-10 md:w-12 md:h-12 rounded-full bg-[#1A1A1A]/80 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 hover:scale-110 transition-all backdrop-blur-sm shadow-lg">
+                            <ChevronLeft className="w-5 h-5 md:w-6 md:h-6" />
                         </button>
-                        <button onClick={handleNext} className="absolute -right-4 top-1/2 -translate-y-1/2 z-30 w-12 h-12 rounded-full bg-[#1A1A1A]/80 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 hover:scale-110 transition-all backdrop-blur-sm">
-                            <ChevronRight className="w-6 h-6" />
+                        <button onClick={handleNext} className="absolute right-0 top-1/2 -translate-y-1/2 z-30 w-10 h-10 md:w-12 md:h-12 rounded-full bg-[#1A1A1A]/80 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 hover:scale-110 transition-all backdrop-blur-sm shadow-lg">
+                            <ChevronRight className="w-5 h-5 md:w-6 md:h-6" />
                         </button>
 
                         {/* Cards */}
@@ -301,7 +301,7 @@ export default function Step3AgentSetup({ data }: Step3Props) {
                                         isActive
                                             ? "z-10 bg-[#151515] border-emerald-500/30 shadow-[0_0_40px_-5px_rgba(16,185,129,0.15)] scale-100"
                                             : "z-0 bg-[#0A0A0A] border-transparent opacity-30 grayscale blur-[1px] shadow-none",
-                                        "w-[280px] h-[400px] rounded-2xl border flex flex-col items-center select-none overflow-hidden"
+                                        "w-[260px] md:w-[280px] h-[380px] md:h-[400px] rounded-2xl border flex flex-col items-center select-none overflow-hidden"
                                     )}
                                     style={{
                                         // Tweaked transform for better spacing and depth
@@ -362,10 +362,10 @@ export default function Step3AgentSetup({ data }: Step3Props) {
 
             {/* Selection Text/Button (Only on Selection) */}
             {viewState === 'SELECTION' && (
-                <div className="fixed bottom-10 left-0 right-0 flex justify-center z-50">
+                <div className="fixed bottom-10 left-0 right-0 flex justify-center z-50 px-4">
                     <Button
                         onClick={handleSelect}
-                        className="h-12 w-[280px] text-base font-medium rounded-lg bg-[#CC5500] hover:bg-[#B34400] text-white shadow-lg transition-all hover:scale-105"
+                        className="h-12 w-full max-w-[280px] text-base font-medium rounded-lg bg-[#CC5500] hover:bg-[#B34400] text-white shadow-lg transition-all hover:scale-105"
                     >
                         Select
                     </Button>
@@ -374,26 +374,26 @@ export default function Step3AgentSetup({ data }: Step3Props) {
 
             {/* SUCCESS View */}
             {viewState === 'SUCCESS' && (
-                <div className="flex w-full max-w-6xl mx-auto items-center justify-between px-16 animate-in slide-in-from-right duration-500">
-                    <div className="text-left space-y-6 max-w-md">
-                        <h1 className="text-5xl font-bold tracking-tight text-white mb-2">
+                <div className="flex flex-col-reverse md:flex-row w-full max-w-6xl mx-auto items-center justify-between px-6 md:px-16 animate-in slide-in-from-right duration-500 gap-8 md:gap-0">
+                    <div className="text-center md:text-left space-y-6 max-w-md">
+                        <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white mb-2">
                             Great choice!
                         </h1>
-                        <p className="text-xl text-zinc-400">
+                        <p className="text-lg md:text-xl text-zinc-400">
                             We'll set up your <span className="text-white font-medium">{selectedAgent.title}</span> agent to get you started.
                         </p>
 
                         <Button
                             onClick={handleContinue}
                             disabled={loading}
-                            className="h-14 px-12 text-lg font-medium rounded-lg bg-[#CC5500] hover:bg-[#B34400] text-white shadow-lg transition-all mt-8"
+                            className="h-14 w-full md:w-auto px-12 text-lg font-medium rounded-lg bg-[#CC5500] hover:bg-[#B34400] text-white shadow-lg transition-all mt-8"
                         >
                             {loading ? "Setting up..." : "Continue"}
                         </Button>
                     </div>
 
                     {/* Selected Card Preview */}
-                    <div className="w-[280px] h-[400px] rounded-2xl border border-emerald-500/30 bg-[#151515] flex flex-col items-center select-none overflow-hidden shadow-[0_0_40px_-5px_rgba(16,185,129,0.15)] scale-100">
+                    <div className="w-[260px] md:w-[280px] h-[380px] md:h-[400px] rounded-2xl border border-emerald-500/30 bg-[#151515] flex flex-col items-center select-none overflow-hidden shadow-[0_0_40px_-5px_rgba(16,185,129,0.15)] scale-100 mb-8 md:mb-0">
                         {/* Matrix Header Pattern */}
                         <div className="w-full h-32 bg-zinc-900/50 relative overflow-hidden flex items-center justify-center">
                             <div className="absolute inset-0 opacity-20" style={{

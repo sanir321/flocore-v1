@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
-import { Bot, Save, Sparkles, Wrench, ArrowLeft, ChevronRight, MessageSquare, Mic, AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { Bot, Save, Sparkles, Wrench, ArrowLeft, ChevronRight, MessageSquare, Mic, AlertTriangle, CheckCircle2, Menu, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import FlowCoreLoader from '@/components/ui/FlowCoreLoader'
 import type { Tables } from '@/types/database.types'
@@ -110,8 +110,10 @@ export default function AgentsPage() {
     const [viewMode, setViewMode] = useState<ViewMode>('chat-agents')
     const [selectedTool, setSelectedTool] = useState<Tool | null>(null)
     const [isAgentsExpanded, setIsAgentsExpanded] = useState(true)
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
     const [escalatedConversations, setEscalatedConversations] = useState<Tables<'conversations'>[]>([])
     const { toast } = useToast()
+    const urlInputRef = useRef<HTMLInputElement>(null)
 
     useEffect(() => {
         const fetchData = async () => {
@@ -181,59 +183,56 @@ export default function AgentsPage() {
         if (!selectedAgent || !workspaceId) return
         setSaving(true)
 
-        try {
-            await supabase
-                .from('agents')
-                .update({
-                    name: selectedAgent.name,
-                    model: selectedAgent.model,
-                    system_prompt: selectedAgent.system_prompt,
-                    active: selectedAgent.active
-                })
-                .eq('id', selectedAgent.id)
+        const { error } = await supabase
+            .from('agents')
+            .update({
+                name: selectedAgent.name,
+                model: selectedAgent.model,
+                system_prompt: selectedAgent.system_prompt,
+                active: selectedAgent.active
+            })
+            .eq('id', selectedAgent.id)
 
-            toast({ title: "Success", description: "Agent saved successfully." })
-        } catch (error: any) {
+        if (error) {
             toast({ title: "Error", description: error.message, variant: "destructive" })
-        } finally {
-            setSaving(false)
+        } else {
+            toast({ title: "Success", description: "Agent saved successfully." })
         }
+        setSaving(false)
     }
 
     const handleSaveWiki = async () => {
         if (!wiki || !workspaceId) return
         setSaving(true)
 
-        try {
-            await supabase
-                .from('agent_wiki')
-                .update(wiki)
-                .eq('workspace_id', workspaceId)
+        const { error } = await supabase
+            .from('agent_wiki')
+            .update(wiki)
+            .eq('workspace_id', workspaceId)
 
-            toast({ title: "Success", description: "Knowledge base saved." })
-        } catch (error: any) {
+        if (error) {
             toast({ title: "Error", description: error.message, variant: "destructive" })
-        } finally {
-            setSaving(false)
+        } else {
+            toast({ title: "Success", description: "Knowledge base saved." })
         }
+        setSaving(false)
     }
 
     const handleSaveRules = async () => {
         if (!escalationRules || !workspaceId) return
         setSaving(true)
 
-        try {
-            await supabase
-                .from('escalation_rules')
-                .update(escalationRules)
-                .eq('workspace_id', workspaceId)
+        const { error } = await supabase
+            .from('escalation_rules')
+            .update(escalationRules)
+            .eq('workspace_id', workspaceId)
 
-            toast({ title: "Success", description: "Escalation rules saved." })
-        } catch (error: any) {
+        if (error) {
             toast({ title: "Error", description: error.message, variant: "destructive" })
-        } finally {
-            setSaving(false)
+        } else {
+            toast({ title: "Success", description: "Escalation rules saved." })
         }
+        setSaving(false)
     }
 
     const handleAgentClick = (agent: Agent) => {
@@ -250,11 +249,40 @@ export default function AgentsPage() {
         return <FlowCoreLoader />
     }
 
+    // Close mobile menu on view change
+    const handleViewChange = (mode: ViewMode) => {
+        setViewMode(mode)
+        setMobileMenuOpen(false)
+    }
+
     return (
-        <div className="flex h-full">
-            {/* Sidebar */}
-            <div className="w-64 border-r bg-card flex flex-col p-4">
-                <div className="mb-6">
+        <div className="flex h-full relative">
+            {/* Mobile Header */}
+            <div className="md:hidden fixed top-14 left-0 right-0 z-40 h-12 bg-background/95 backdrop-blur-md border-b flex items-center justify-between px-4">
+                <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-purple-500" />
+                    <span className="font-semibold text-sm">Agent Hub</span>
+                </div>
+                <button
+                    onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                    className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-muted transition-colors"
+                >
+                    {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+                </button>
+            </div>
+
+            {/* Mobile Menu Overlay */}
+            {mobileMenuOpen && (
+                <div className="md:hidden fixed inset-0 z-30 bg-black/50 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
+            )}
+
+            {/* Sidebar - Desktop always visible, Mobile as slide-out */}
+            <div className={cn(
+                "border-r bg-card flex flex-col p-4 transition-transform duration-300",
+                "fixed md:static top-[104px] md:top-0 left-0 bottom-0 z-40 w-64",
+                mobileMenuOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+            )}>
+                <div className="mb-6 hidden md:block">
                     <h2 className="font-semibold text-lg flex items-center gap-2">
                         <Sparkles className="h-5 w-5 text-purple-500" />
                         Agent Hub
@@ -277,7 +305,7 @@ export default function AgentsPage() {
                         {isAgentsExpanded && (
                             <div className="ml-2 pl-2 border-l border-border space-y-1 mt-1 animate-in slide-in-from-top-1 duration-200">
                                 <button
-                                    onClick={() => setViewMode('chat-agents')}
+                                    onClick={() => handleViewChange('chat-agents')}
                                     className={cn(
                                         "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                                         viewMode === 'chat-agents' || viewMode === 'agent-detail'
@@ -290,7 +318,7 @@ export default function AgentsPage() {
                                 </button>
 
                                 <button
-                                    onClick={() => setViewMode('voice-agents')}
+                                    onClick={() => handleViewChange('voice-agents')}
                                     className={cn(
                                         "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                                         viewMode === 'voice-agents'
@@ -306,7 +334,7 @@ export default function AgentsPage() {
                     </div>
 
                     <button
-                        onClick={() => setViewMode('tools')}
+                        onClick={() => handleViewChange('tools')}
                         className={cn(
                             "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                             viewMode === 'tools' || viewMode === 'tool-detail'
@@ -319,7 +347,7 @@ export default function AgentsPage() {
                     </button>
 
                     <button
-                        onClick={() => setViewMode('escalations')}
+                        onClick={() => handleViewChange('escalations')}
                         className={cn(
                             "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                             viewMode === 'escalations'
@@ -332,7 +360,7 @@ export default function AgentsPage() {
                     </button>
 
                     <button
-                        onClick={() => setViewMode('knowledge-base')}
+                        onClick={() => handleViewChange('knowledge-base')}
                         className={cn(
                             "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                             viewMode === 'knowledge-base'
@@ -347,11 +375,11 @@ export default function AgentsPage() {
             </div>
 
             {/* Main Content */}
-            <div className="flex-1 overflow-auto bg-slate-50/50">
+            <div className="flex-1 overflow-auto bg-slate-50/50 pt-12 md:pt-0">
 
                 {/* Chat Agents Grid View */}
                 {viewMode === 'chat-agents' && (
-                    <div className="p-8">
+                    <div className="p-4 md:p-8">
                         <div className="flex justify-between items-center mb-8">
                             <h1 className="text-2xl font-semibold">Chat Agents</h1>
                             <Button size="sm" variant="outline">Create Chat Agent</Button>
@@ -386,11 +414,12 @@ export default function AgentsPage() {
                                     <div className="pt-14 pb-8 px-6 text-center">
                                         <h3 className="font-semibold text-lg mb-2">{agent.name}</h3>
                                         <p className="text-sm text-muted-foreground line-clamp-3 mb-4">
-                                            AI agent specialized in scheduling and managing appointments with precision.
+                                            {/* TODO: Add description to Agent schema if needed, fallback for now */}
+                                            {agent.system_prompt ? agent.system_prompt.slice(0, 80) + "..." : "AI agent specialized in customer operations."}
                                         </p>
                                         <div className="flex items-center justify-center gap-2">
-                                            <span className="h-2 w-2 rounded-full bg-amber-400"></span>
-                                            <span className="text-xs font-medium text-amber-500">Copilot</span>
+                                            <span className={cn("h-2 w-2 rounded-full", agent.active ? "bg-green-500" : "bg-gray-300")}></span>
+                                            <span className="text-xs font-medium text-slate-600">{agent.type || 'Assistant'}</span>
                                         </div>
                                     </div>
                                 </button>
@@ -401,7 +430,7 @@ export default function AgentsPage() {
 
                 {/* Agent Detail View (Existing Editor) */}
                 {viewMode === 'agent-detail' && selectedAgent && (
-                    <div className="p-8">
+                    <div className="p-4 md:p-8">
                         <div className="max-w-4xl mx-auto space-y-6">
                             <div className="flex items-center gap-2 mb-6">
                                 <Button
@@ -477,7 +506,7 @@ export default function AgentsPage() {
 
                 {/* Knowledge Base View - Unified Single Card */}
                 {viewMode === 'knowledge-base' && wiki && (
-                    <div className="p-8">
+                    <div className="p-4 md:p-8">
                         <div className="max-w-4xl mx-auto">
                             {/* Header with Save Button */}
                             <div className="flex items-center justify-between mb-6">
@@ -500,14 +529,13 @@ export default function AgentsPage() {
                                             <Input
                                                 placeholder="https://yourwebsite.com"
                                                 className="bg-white flex-1"
-                                                id="website-url"
+                                                ref={urlInputRef}
                                             />
                                             <Button
                                                 variant="outline"
                                                 size="sm"
                                                 onClick={async () => {
-                                                    const urlInput = document.getElementById('website-url') as HTMLInputElement
-                                                    const url = urlInput.value
+                                                    const url = urlInputRef.current?.value
                                                     if (!url) {
                                                         toast({ title: "Error", description: "Enter a URL", variant: "destructive" })
                                                         return
@@ -520,7 +548,7 @@ export default function AgentsPage() {
                                                         const content = `${data.title || 'Website'}\n${data.content || ''}`
                                                         setWiki(prev => prev ? { ...prev, business_info: prev.business_info ? `${prev.business_info}\n\n${content}` : content } : null)
                                                         toast({ title: "Success", description: "Content imported!" })
-                                                        urlInput.value = ''
+                                                        if (urlInputRef.current) urlInputRef.current.value = ''
                                                     } catch (e: any) {
                                                         toast({ title: "Error", description: e.message, variant: "destructive" })
                                                     } finally {
@@ -543,11 +571,16 @@ export default function AgentsPage() {
                                                     onChange={async (e) => {
                                                         const file = e.target.files?.[0]
                                                         if (!file) return
+
+                                                        if (file.type === 'application/pdf') {
+                                                            toast({ title: "Error", description: "PDF import not supported yet", variant: "destructive" })
+                                                            e.target.value = ''
+                                                            return;
+                                                        }
+
                                                         setSaving(true)
                                                         try {
-                                                            const text = file.type === 'application/pdf'
-                                                                ? `[PDF: ${file.name}]`
-                                                                : await file.text()
+                                                            const text = await file.text()
                                                             setWiki(prev => prev ? { ...prev, business_info: prev.business_info ? `${prev.business_info}\n\n${file.name}\n${text}` : `${file.name}\n${text}` } : null)
                                                             toast({ title: "Success", description: "File imported!" })
                                                         } catch {
@@ -624,7 +657,7 @@ A: Full refund within 30 days.`}
 
                 {/* AI Tools */}
                 {viewMode === 'tools' && (
-                    <div className="p-8">
+                    <div className="p-4 md:p-8">
                         <div className="mb-8">
                             <h1 className="text-2xl font-semibold">AI Tools</h1>
                             <p className="text-muted-foreground">Tools that your AI agent can access</p>
@@ -666,7 +699,7 @@ A: Full refund within 30 days.`}
 
                 {/* Tool Detail View */}
                 {viewMode === 'tool-detail' && selectedTool && (
-                    <div className="p-8">
+                    <div className="p-4 md:p-8">
                         <div className="max-w-4xl mx-auto">
                             <button
                                 onClick={() => setViewMode('tools')}
@@ -760,7 +793,7 @@ A: Full refund within 30 days.`}
 
                 {/* Escalation Center View */}
                 {viewMode === 'escalations' && (
-                    <div className="p-8">
+                    <div className="p-4 md:p-8">
                         <div className="max-w-6xl mx-auto">
                             <div className="flex justify-between items-center mb-8">
                                 <div>
@@ -793,7 +826,7 @@ A: Full refund within 30 days.`}
                                     ↓ Newest First <ChevronRight className="h-3 w-3 ml-1 rotate-90" />
                                 </Button>
                                 <div className="flex-1" />
-                                <span className="text-sm text-muted-foreground">0 escalations (filtered)</span>
+                                <span className="text-sm text-muted-foreground">{escalatedConversations.length} escalations (filtered)</span>
                             </div>
 
                             {/* Table Header */}
@@ -811,7 +844,7 @@ A: Full refund within 30 days.`}
                                         <div key={conv.id} className="grid grid-cols-4 gap-4 px-4 py-4 border-b last:border-0 hover:bg-slate-50 transition-colors items-center">
                                             <div>
                                                 <div className="font-medium text-sm text-foreground">{conv.escalation_reason}</div>
-                                                <div className="text-xs text-muted-foreground mt-0.5">ID: {conv.contact_id.slice(0, 8)}...</div>
+                                                <div className="text-xs text-muted-foreground mt-0.5">ID: {conv.contact_id ? conv.contact_id.slice(0, 8) : 'Unknown'}...</div>
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 <span className="capitalize text-sm text-foreground">{conv.channel || 'chat'}</span>

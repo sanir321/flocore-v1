@@ -134,7 +134,9 @@ export default function ContactsPage() {
             let wsId = selectedContact?.workspace_id
             if (!wsId) {
                 const { data: { user } } = await supabase.auth.getUser()
-                const { data: workspace } = await supabase.from('workspaces').select('id').eq('owner_id', user!.id).single()
+                if (!user) throw new Error("User not authenticated")
+
+                const { data: workspace } = await supabase.from('workspaces').select('id').eq('owner_id', user.id).single()
                 if (!workspace) throw new Error("Workspace not found")
                 wsId = workspace.id
                 payload.workspace_id = wsId
@@ -210,10 +212,10 @@ export default function ContactsPage() {
 
                 {/* Table Header */}
                 <div className="grid grid-cols-12 gap-3 px-4 py-2 border-b border-border/50 bg-muted/20 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    <div className="col-span-4">Name & Channel</div>
-                    <div className="col-span-4">Contact Details</div>
-                    <div className="col-span-3">Tags</div>
-                    <div className="col-span-1 text-right">Action</div>
+                    <div className="col-span-8 md:col-span-4">Name & Channel</div>
+                    <div className="hidden md:block md:col-span-4">Contact Details</div>
+                    <div className="hidden md:block md:col-span-3">Tags</div>
+                    <div className="col-span-4 md:col-span-1 text-right">Action</div>
                 </div>
 
                 {/* Table Body */}
@@ -257,7 +259,7 @@ export default function ContactsPage() {
                                 className="grid grid-cols-12 gap-3 px-4 py-2 items-center hover:bg-muted/30 transition-colors rounded-lg group border border-transparent hover:border-border/30 cursor-pointer"
                             >
                                 {/* Name Column */}
-                                <div className="col-span-4 flex items-center gap-3">
+                                <div className="col-span-8 md:col-span-4 flex items-center gap-3">
                                     <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-100 to-purple-100 text-indigo-600 flex items-center justify-center font-bold text-xs shadow-sm ring-1 ring-white">
                                         {(contact.name?.[0] || contact.phone?.[0] || '?').toUpperCase()}
                                     </div>
@@ -275,7 +277,7 @@ export default function ContactsPage() {
                                 </div>
 
                                 {/* Details Column */}
-                                <div className="col-span-4 space-y-0.5">
+                                <div className="hidden md:block md:col-span-4 space-y-0.5">
                                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                         <Phone className="h-3 w-3 opacity-60" />
                                         <span className="font-mono text-[10px]">{contact.phone}</span>
@@ -289,7 +291,7 @@ export default function ContactsPage() {
                                 </div>
 
                                 {/* Tags Column */}
-                                <div className="col-span-3">
+                                <div className="hidden md:block md:col-span-3">
                                     <div className="flex flex-wrap gap-1.5">
                                         {contact.tags && contact.tags.length > 0 ? (
                                             contact.tags.slice(0, 2).map(tag => (
@@ -307,8 +309,8 @@ export default function ContactsPage() {
                                 </div>
 
                                 {/* Action Column */}
-                                <div className="col-span-1 flex justify-end">
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="col-span-4 md:col-span-1 flex justify-end">
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                         <MoreHorizontal className="h-4 w-4" />
                                     </Button>
                                 </div>
@@ -319,7 +321,7 @@ export default function ContactsPage() {
             </div>
 
             <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
-                <SheetContent side="right" className="w-[400px] sm:w-[540px]">
+                <SheetContent side="right" className="w-full sm:w-[540px]">
                     <SheetHeader>
                         <SheetTitle>{selectedContact ? 'Edit Contact' : 'New Contact'}</SheetTitle>
                         <SheetDescription>

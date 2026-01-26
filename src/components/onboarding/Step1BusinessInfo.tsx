@@ -46,11 +46,12 @@ export default function Step1BusinessInfo({ defaultValues, onNext }: Step1Props)
                     />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                         <Label htmlFor="size" className="text-zinc-300">Company size</Label>
                         <select
                             id="size"
+                            required
                             value={data.size}
                             onChange={e => setData({ ...data, size: e.target.value })}
                             className="flex h-12 w-full items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 appearance-none"
@@ -68,6 +69,7 @@ export default function Step1BusinessInfo({ defaultValues, onNext }: Step1Props)
                         <Label htmlFor="industry" className="text-zinc-300">Industry</Label>
                         <select
                             id="industry"
+                            required
                             value={data.industry}
                             onChange={e => setData({ ...data, industry: e.target.value })}
                             className="flex h-12 w-full items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 appearance-none"
@@ -87,6 +89,7 @@ export default function Step1BusinessInfo({ defaultValues, onNext }: Step1Props)
                     <Label htmlFor="source" className="text-zinc-300">Where did you hear about us?</Label>
                     <select
                         id="source"
+                        required
                         value={data.source}
                         onChange={e => setData({ ...data, source: e.target.value })}
                         className="flex h-12 w-full items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 appearance-none"

@@ -82,6 +82,8 @@ export default function LandingPage() {
     const [activeCapability, setActiveCapability] = useState('understanding')
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
     const [scrolled, setScrolled] = useState(false)
+    const [email, setEmail] = useState('')
+
 
     useEffect(() => {
         const handleScroll = () => setScrolled(window.scrollY > 20)
@@ -192,7 +194,7 @@ export default function LandingPage() {
             </nav>
 
             {/* ===== HERO SECTION ===== */}
-            <section className="relative pt-40 pb-24 overflow-hidden">
+            <section className="relative pt-24 md:pt-40 pb-24 overflow-hidden">
                 <div className="container relative z-10 mx-auto px-6 text-center">
                     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-50 border border-orange-100 text-primary text-xs font-semibold uppercase tracking-wider mb-8">
                         <Zap className="h-3 w-3" />
@@ -216,8 +218,10 @@ export default function LandingPage() {
                                 type="email"
                                 placeholder="example@company.com"
                                 className="border-0 bg-transparent text-slate-900 placeholder:text-slate-400 h-12 px-6 focus-visible:ring-0"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
                             />
-                            <Link to="/signup">
+                            <Link to={`/signup?email=${encodeURIComponent(email)}`}>
                                 <Button size="lg" className="h-12 px-6 rounded-full bg-primary hover:bg-primary/90 text-white font-semibold whitespace-nowrap shadow-md shadow-primary/20">
                                     See Flowcore in action <ArrowRight className="ml-2 h-4 w-4" />
                                 </Button>
@@ -238,8 +242,8 @@ export default function LandingPage() {
                                 </div>
                             </div>
                             <div className="p-6 grid grid-cols-12 gap-6 min-h-[400px] text-left">
-                                {/* Sidebar */}
-                                <div className="col-span-3 border-r border-slate-100 pr-4">
+                                {/* Sidebar - Hidden on mobile */}
+                                <div className="hidden md:block md:col-span-3 border-r border-slate-100 pr-4">
                                     <div className="flex items-center gap-2 mb-6">
                                         <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                                         <span className="text-green-600 text-sm font-medium">System Online</span>
@@ -254,27 +258,27 @@ export default function LandingPage() {
                                         <p className="text-2xl font-bold text-slate-900">23</p>
                                     </div>
                                 </div>
-                                {/* Chat area */}
-                                <div className="col-span-9 flex flex-col">
+                                {/* Chat area - Full width on mobile */}
+                                <div className="col-span-12 md:col-span-9 flex flex-col">
                                     <div className="flex-1 space-y-6">
                                         <div className="flex gap-4">
-                                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-xs font-bold">JD</div>
-                                            <div className="bg-slate-50 rounded-2xl rounded-tl-none px-5 py-4 max-w-[70%] text-sm text-slate-700">
+                                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-xs font-bold flex-none">JD</div>
+                                            <div className="bg-slate-50 rounded-2xl rounded-tl-none px-5 py-4 max-w-[85%] md:max-w-[70%] text-sm text-slate-700">
                                                 I still haven't received my refund from last week...
                                             </div>
                                         </div>
-                                        <div className="ml-12 bg-white border border-orange-100 shadow-sm rounded-lg p-3 max-w-[60%] flex items-center gap-3">
-                                            <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                                        <div className="ml-12 bg-white border border-orange-100 shadow-sm rounded-lg p-3 max-w-[85%] md:max-w-[60%] flex items-center gap-3">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-orange-500 flex-none" />
                                             <div>
                                                 <p className="text-xs font-semibold text-slate-900">Checking Refund Policy</p>
                                                 <p className="text-xs text-slate-500">Order #4521 matched</p>
                                             </div>
                                         </div>
                                         <div className="flex gap-4 justify-end">
-                                            <div className="bg-primary text-white rounded-2xl rounded-tr-none px-5 py-4 max-w-[70%] text-sm shadow-md shadow-primary/10">
+                                            <div className="bg-primary text-white rounded-2xl rounded-tr-none px-5 py-4 max-w-[85%] md:max-w-[70%] text-sm shadow-md shadow-primary/10">
                                                 I've processed your refund of $49.99. You'll see it in 3-5 business days. Is there anything else I can help with?
                                             </div>
-                                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-orange-400 flex items-center justify-center shadow-lg shadow-primary/20">
+                                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-orange-400 flex items-center justify-center shadow-lg shadow-primary/20 flex-none">
                                                 <Bot className="h-4 w-4 text-white" />
                                             </div>
                                         </div>

@@ -12,7 +12,9 @@ import {
     Settings,
     LogOut,
     Bot,
-    BarChart3
+    BarChart3,
+    Menu,
+    X
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { sendEscalationNotification } from '@/lib/notifications'
@@ -32,7 +34,13 @@ export default function AppLayout() {
     const { session, loading, user } = useAuth()
     const [checkingWorkspace, setCheckingWorkspace] = useState(true)
     const [currentWorkspace, setCurrentWorkspace] = useState<Pick<Tables<'workspaces'>, 'id' | 'owner_id' | 'name'> | null>(null)
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
     const location = useLocation()
+
+    // Close mobile menu on route change
+    useEffect(() => {
+        setMobileMenuOpen(false)
+    }, [location.pathname])
 
     // Map routes to titles
     const getPageTitle = (pathname: string) => {
@@ -46,30 +54,44 @@ export default function AppLayout() {
     }
 
     useEffect(() => {
+        let mounted = true
+
         const checkWorkspace = async () => {
             if (!user) {
-                setCheckingWorkspace(false)
+                if (mounted) setCheckingWorkspace(false)
                 return
             }
 
-            const { data } = await supabase
-                .from('workspaces')
-                .select('id, owner_id, name') // Add any other needed fields
-                .eq('owner_id', user.id)
-                .single()
+            try {
+                const { data, error } = await supabase
+                    .from('workspaces')
+                    .select('id, owner_id, name')
+                    .eq('owner_id', user.id)
+                    .single()
 
-            if (data) {
-                setCurrentWorkspace(data)
+                if (error) {
+                    console.error('[AppLayout] Error fetching workspace:', error)
+                    // Optionally surface error? For now just log.
+                }
+
+                if (data && mounted) {
+                    setCurrentWorkspace(data)
+                }
+            } catch (err) {
+                console.error('[AppLayout] Unexpected error:', err)
+            } finally {
+                if (mounted) setCheckingWorkspace(false)
             }
-
-            setCheckingWorkspace(false)
         }
 
         if (user) {
             checkWorkspace()
         } else if (!loading) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect
             setCheckingWorkspace(false)
+        }
+
+        return () => {
+            mounted = false
         }
     }, [user, loading])
 
@@ -133,8 +155,66 @@ export default function AppLayout() {
                 <div className="absolute inset-0 bg-grid-small-black/[0.05] -z-10" />
             </div>
 
-            {/* Sidebar (Slim & Compact) */}
-            <aside className="z-20 w-[64px] flex-none border-r border-border/60 bg-card/80 backdrop-blur-md flex flex-col items-center py-4 gap-2">
+            {/* Mobile Header */}
+            <div className="md:hidden fixed top-0 left-0 right-0 z-50 h-14 bg-background/95 backdrop-blur-md border-b flex items-center justify-between px-4">
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-orange-600 flex items-center justify-center shadow-lg shadow-primary/20">
+                        <span className="text-white font-bold text-base">F</span>
+                    </div>
+                    <span className="font-semibold text-sm">{getPageTitle(location.pathname)}</span>
+                </div>
+                <button
+                    onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                    aria-expanded={mobileMenuOpen}
+                    aria-label={mobileMenuOpen ? "Close mobile menu" : "Open mobile menu"}
+                    className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-muted transition-colors"
+                >
+                    {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+                </button>
+            </div>
+
+            {/* Mobile Menu Overlay */}
+            {mobileMenuOpen && (
+                <div className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
+            )}
+
+            {/* Mobile Slide-out Menu */}
+            <div className={cn(
+                "md:hidden fixed top-14 left-0 bottom-0 z-50 w-64 bg-card border-r transform transition-transform duration-300 ease-out",
+                mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+            )}>
+                <nav className="flex flex-col p-4 gap-1">
+                    {navItems.map((item) => (
+                        <NavLink
+                            key={item.to}
+                            to={item.to}
+                            className={({ isActive }) =>
+                                cn(
+                                    "flex items-center gap-3 px-4 py-3 rounded-lg transition-all",
+                                    isActive
+                                        ? "bg-primary text-primary-foreground shadow-sm"
+                                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                )
+                            }
+                        >
+                            <item.icon className="h-5 w-5" strokeWidth={1.5} />
+                            <span className="font-medium">{item.label}</span>
+                        </NavLink>
+                    ))}
+                </nav>
+                <div className="absolute bottom-0 left-0 right-0 p-4 border-t">
+                    <button
+                        onClick={handleSignOut}
+                        className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all"
+                    >
+                        <LogOut className="h-5 w-5" strokeWidth={1.5} />
+                        <span className="font-medium">Sign Out</span>
+                    </button>
+                </div>
+            </div>
+
+            {/* Desktop Sidebar (Hidden on Mobile) */}
+            <aside className="hidden md:flex z-20 w-[64px] flex-none border-r border-border/60 bg-card/80 backdrop-blur-md flex-col items-center py-4 gap-2">
                 {/* Brand Logo */}
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-orange-600 flex items-center justify-center mb-6 shadow-lg shadow-primary/20 shrink-0">
                     <span className="text-white font-bold text-base">F</span>
@@ -159,7 +239,7 @@ export default function AppLayout() {
                                 <item.icon className="h-5 w-5" strokeWidth={1.5} />
                             </NavLink>
 
-                            {/* Hover Tooltip (Updated Position) */}
+                            {/* Hover Tooltip */}
                             <div className="absolute left-12 bg-popover text-popover-foreground text-[10px] font-medium px-2 py-1 rounded border shadow-md opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200 pointer-events-none whitespace-nowrap z-50">
                                 {item.label}
                             </div>
@@ -182,11 +262,12 @@ export default function AppLayout() {
             {/* Main Content Area */}
             <main className={cn(
                 "relative z-10 flex-1 flex flex-col bg-background/50",
+                "pt-14 md:pt-0", // Add top padding on mobile for fixed header
                 location.pathname.startsWith('/inbox') ? "overflow-hidden" : "overflow-auto"
             )}>
-                {/* Top Header / Context Bar (Compact) - Hidden for Inbox to maximize space */}
+                {/* Desktop Header - Hidden for Inbox */}
                 {!location.pathname.startsWith('/inbox') && (
-                    <header className="flex-none h-14 px-6 flex items-center justify-between border-b border-border/40 bg-background/80 backdrop-blur-sm sticky top-0 z-30">
+                    <header className="hidden md:flex flex-none h-14 px-6 items-center justify-between border-b border-border/40 bg-background/80 backdrop-blur-sm sticky top-0 z-30">
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <span className="font-semibold text-foreground tracking-tight">
                                 {currentWorkspace?.name || 'Loading...'}
@@ -201,7 +282,7 @@ export default function AppLayout() {
                     "flex-1 duration-300",
                     location.pathname.startsWith('/inbox')
                         ? "p-0 overflow-hidden"
-                        : "p-6 animate-in fade-in zoom-in-95"
+                        : "p-4 md:p-6 animate-in fade-in zoom-in-95"
                 )}>
                     <WorkspaceProvider value={{ workspace: currentWorkspace, loading: checkingWorkspace }}>
                         <Outlet />
@@ -211,3 +292,4 @@ export default function AppLayout() {
         </div>
     )
 }
+

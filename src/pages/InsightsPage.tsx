@@ -55,7 +55,10 @@ export default function InsightsPage() {
             try {
                 setLoading(true)
                 const { data: { user } } = await supabase.auth.getUser()
-                if (!user) return
+                if (!user) {
+                    setLoading(false)
+                    return
+                }
 
                 const workspaceId = await getWorkspaceId(user.id)
                 if (!workspaceId) {
@@ -199,7 +202,7 @@ export default function InsightsPage() {
 
     return (
         <div className="flex flex-col h-full bg-white overflow-y-auto">
-            <div className="px-8 py-6 max-w-[1600px] mx-auto w-full space-y-6">
+            <div className="px-4 md:px-8 py-6 max-w-[1600px] mx-auto w-full space-y-6">
 
                 {/* Header Section */}
                 <div>
@@ -208,17 +211,19 @@ export default function InsightsPage() {
 
                 {/* Tabs Navigation */}
                 <Tabs defaultValue="trends" className="space-y-6">
-                    <TabsList className="bg-transparent border-b w-full justify-start h-auto p-0 space-x-8 rounded-none">
-                        {['Trends', 'Escalations', 'Conversations'].map(tab => (
-                            <TabsTrigger
-                                key={tab}
-                                value={tab.toLowerCase()}
-                                className="rounded-none border-b-2 border-transparent data-[state=active]:border-black data-[state=active]:shadow-none px-0 py-3 text-sm font-medium text-muted-foreground data-[state=active]:text-foreground transition-none"
-                            >
-                                {tab}
-                            </TabsTrigger>
-                        ))}
-                    </TabsList>
+                    <div className="w-full overflow-x-auto pb-2 -mb-2">
+                        <TabsList className="bg-transparent border-b w-full justify-start h-auto p-0 space-x-8 rounded-none min-w-max">
+                            {['Trends', 'Escalations', 'Conversations'].map(tab => (
+                                <TabsTrigger
+                                    key={tab}
+                                    value={tab.toLowerCase()}
+                                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-black data-[state=active]:shadow-none px-0 py-3 text-sm font-medium text-muted-foreground data-[state=active]:text-foreground transition-none"
+                                >
+                                    {tab}
+                                </TabsTrigger>
+                            ))}
+                        </TabsList>
+                    </div>
 
                     {/* Filters Row */}
                     <div className="flex flex-wrap items-center gap-3">
