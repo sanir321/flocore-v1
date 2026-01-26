@@ -429,6 +429,7 @@ function AppointmentsListView({ appointments, handleCancel, handleCopyLink, open
                     className="border rounded px-2 py-1 bg-background text-sm"
                     value={filterShow}
                     onChange={(e) => setFilterShow(e.target.value)}
+                    aria-label="Show appointments"
                 >
                     <option value="All">All</option>
                     <option value="Upcoming">Upcoming</option>
