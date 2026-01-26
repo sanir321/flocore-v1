@@ -11,7 +11,6 @@ import {
     Users,
     Settings,
     LogOut,
-    Book,
     Bot,
     BarChart3
 } from 'lucide-react'
@@ -25,9 +24,9 @@ const navItems = [
     { to: '/appointments', label: 'Appointments', icon: Calendar },
     { to: '/contacts', label: 'Contacts', icon: Users },
     { to: '/agents', label: 'Agent Hub', icon: Bot },
-    { to: '/knowledge-base', label: 'Knowledge Base', icon: Book },
     { to: '/settings', label: 'Settings', icon: Settings },
 ]
+
 
 export default function AppLayout() {
     const { session, loading, user } = useAuth()
@@ -181,19 +180,29 @@ export default function AppLayout() {
             </aside>
 
             {/* Main Content Area */}
-            <main className="relative z-10 flex-1 overflow-auto flex flex-col bg-background/50">
-                {/* Top Header / Context Bar (Compact) */}
-                <header className="flex-none h-14 px-6 flex items-center justify-between border-b border-border/40 bg-background/80 backdrop-blur-sm sticky top-0 z-30">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span className="font-semibold text-foreground tracking-tight">
-                            {currentWorkspace?.name || 'Loading...'}
-                        </span>
-                        <span className="text-border">/</span>
-                        <span className="font-medium">{getPageTitle(location.pathname)}</span>
-                    </div>
-                </header>
+            <main className={cn(
+                "relative z-10 flex-1 flex flex-col bg-background/50",
+                location.pathname.startsWith('/inbox') ? "overflow-hidden" : "overflow-auto"
+            )}>
+                {/* Top Header / Context Bar (Compact) - Hidden for Inbox to maximize space */}
+                {!location.pathname.startsWith('/inbox') && (
+                    <header className="flex-none h-14 px-6 flex items-center justify-between border-b border-border/40 bg-background/80 backdrop-blur-sm sticky top-0 z-30">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span className="font-semibold text-foreground tracking-tight">
+                                {currentWorkspace?.name || 'Loading...'}
+                            </span>
+                            <span className="text-border">/</span>
+                            <span className="font-medium">{getPageTitle(location.pathname)}</span>
+                        </div>
+                    </header>
+                )}
 
-                <div className="flex-1 p-6 animate-in fade-in zoom-in-95 duration-300">
+                <div className={cn(
+                    "flex-1 duration-300",
+                    location.pathname.startsWith('/inbox')
+                        ? "p-0 overflow-hidden"
+                        : "p-6 animate-in fade-in zoom-in-95"
+                )}>
                     <WorkspaceProvider value={{ workspace: currentWorkspace, loading: checkingWorkspace }}>
                         <Outlet />
                     </WorkspaceProvider>

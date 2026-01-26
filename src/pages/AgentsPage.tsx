@@ -475,201 +475,135 @@ export default function AgentsPage() {
                     </div>
                 )}
 
-                {/* Knowledge Base View */}
+                {/* Knowledge Base View - Unified Single Card */}
                 {viewMode === 'knowledge-base' && wiki && (
                     <div className="p-8">
-                        <div className="max-w-4xl mx-auto space-y-6">
-                            <div className="mb-8">
-                                <h1 className="text-2xl font-semibold">Knowledge Base</h1>
-                                <p className="text-muted-foreground">Global information available to all agents</p>
+                        <div className="max-w-4xl mx-auto">
+                            {/* Header with Save Button */}
+                            <div className="flex items-center justify-between mb-6">
+                                <div>
+                                    <h1 className="text-2xl font-semibold">Knowledge Base</h1>
+                                    <p className="text-muted-foreground">Train your AI with business information</p>
+                                </div>
+                                <Button onClick={handleSaveWiki} disabled={saving} className="bg-orange-500 hover:bg-orange-600">
+                                    <Save className="h-4 w-4 mr-2" />
+                                    {saving ? "Saving..." : "Save Changes"}
+                                </Button>
                             </div>
 
                             <Card className="rounded-xl shadow-sm border-0 bg-white">
-                                <CardHeader>
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <CardTitle className="text-base">Data Sources</CardTitle>
-                                            <CardDescription>Populate your knowledge base from external sources</CardDescription>
-                                        </div>
-                                    </div>
-                                </CardHeader>
-                                <CardContent className="space-y-6">
-                                    {/* Website Scraper */}
-                                    <div className="space-y-4 p-4 border rounded-xl bg-slate-50/50">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <div className="p-2 bg-blue-100 rounded-lg text-blue-600">
-                                                <Bot className="h-4 w-4" />
-                                            </div>
-                                            <div>
-                                                <h3 className="text-sm font-medium">Import from Website</h3>
-                                                <p className="text-xs text-muted-foreground">Scrape business info from your company site</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex gap-2">
+                                <CardContent className="p-6 space-y-6">
+                                    {/* Import Tools - Compact Row */}
+                                    <div className="flex gap-4 p-4 bg-slate-50 rounded-xl">
+                                        {/* Website Import */}
+                                        <div className="flex-1 flex gap-2">
                                             <Input
-                                                placeholder="https://example.com"
-                                                className="bg-white"
+                                                placeholder="https://yourwebsite.com"
+                                                className="bg-white flex-1"
                                                 id="website-url"
                                             />
                                             <Button
                                                 variant="outline"
+                                                size="sm"
                                                 onClick={async () => {
                                                     const urlInput = document.getElementById('website-url') as HTMLInputElement
                                                     const url = urlInput.value
                                                     if (!url) {
-                                                        toast({ title: "Error", description: "Please enter a URL", variant: "destructive" })
+                                                        toast({ title: "Error", description: "Enter a URL", variant: "destructive" })
                                                         return
                                                     }
-
                                                     setSaving(true)
-                                                    toast({ title: "Scraping Website...", description: "This may take a few seconds." })
-
+                                                    toast({ title: "Importing...", description: "Fetching website content" })
                                                     try {
-                                                        const { data, error } = await supabase.functions.invoke('scrape-website', {
-                                                            body: { url }
-                                                        })
-
+                                                        const { data, error } = await supabase.functions.invoke('scrape-website', { body: { url } })
                                                         if (error) throw error
-
-                                                        setWiki(prev => {
-                                                            if (!prev) return null
-                                                            return {
-                                                                ...prev,
-                                                                business_info: (prev.business_info ? prev.business_info + '\n\n' : '') + `=== SCOPED FROM ${url} ===\nTitle: ${data.title}\n${data.content}`
-                                                            }
-                                                        })
-
-                                                        toast({ title: "Success", description: "Website content added to Business Info." })
-                                                    } catch (error: any) {
-                                                        toast({ title: "Error", description: error.message || "Failed to scrape website", variant: "destructive" })
+                                                        const content = `${data.title || 'Website'}\n${data.content || ''}`
+                                                        setWiki(prev => prev ? { ...prev, business_info: prev.business_info ? `${prev.business_info}\n\n${content}` : content } : null)
+                                                        toast({ title: "Success", description: "Content imported!" })
+                                                        urlInput.value = ''
+                                                    } catch (e: any) {
+                                                        toast({ title: "Error", description: e.message, variant: "destructive" })
                                                     } finally {
                                                         setSaving(false)
                                                     }
                                                 }}
                                                 disabled={saving}
                                             >
-                                                {saving ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : "Fetch"}
+                                                {saving ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : "Import Website"}
                                             </Button>
                                         </div>
-                                    </div>
 
-                                    {/* File Upload */}
-                                    <div className="space-y-4 p-4 border rounded-xl bg-slate-50/50">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <div className="p-2 bg-orange-100 rounded-lg text-orange-600">
-                                                <Bot className="h-4 w-4" />
-                                            </div>
-                                            <div>
-                                                <h3 className="text-sm font-medium">Upload Documents</h3>
-                                                <p className="text-xs text-muted-foreground">Upload PDFs or Text files for FAQs and Policies</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center justify-center w-full">
-                                            <label htmlFor="dropzone-file" className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer bg-white hover:bg-slate-50 transition-colors">
-                                                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                                    <p className="mb-2 text-sm text-gray-500"><span className="font-semibold">Click to upload</span> or drag and drop</p>
-                                                    <p className="text-xs text-gray-500">PDF, TXT, MD (MAX. 5MB)</p>
-                                                </div>
+                                        {/* File Upload */}
+                                        <div className="flex items-center">
+                                            <label className="cursor-pointer">
                                                 <input
-                                                    id="dropzone-file"
                                                     type="file"
                                                     className="hidden"
                                                     accept=".txt,.md,.pdf"
                                                     onChange={async (e) => {
                                                         const file = e.target.files?.[0]
                                                         if (!file) return
-
                                                         setSaving(true)
-                                                        toast({ title: "Processing File...", description: "Extracting text..." })
-
                                                         try {
-                                                            let text = ""
-                                                            if (file.type === 'application/pdf') {
-                                                                // Basic PDF handling info for user
-                                                                toast({ title: "Info", description: "Full PDF parsing requires backend. Treating as plain text for now." })
-                                                                // Placeholder for real PDF logic
-                                                                text = `[PDF File: ${file.name}] - (Content extraction pending server setup)`
-                                                            } else {
-                                                                text = await file.text()
-                                                            }
-
-                                                            setWiki(prev => {
-                                                                if (!prev) return null
-                                                                return {
-                                                                    ...prev,
-                                                                    procedures: (prev.procedures ? prev.procedures + '\n\n' : '') + `=== FILE: ${file.name} ===\n${text}`
-                                                                }
-                                                            })
-
-                                                            toast({ title: "Success", description: "File content added to Procedures." })
-                                                        } catch (error: any) {
+                                                            const text = file.type === 'application/pdf'
+                                                                ? `[PDF: ${file.name}]`
+                                                                : await file.text()
+                                                            setWiki(prev => prev ? { ...prev, business_info: prev.business_info ? `${prev.business_info}\n\n${file.name}\n${text}` : `${file.name}\n${text}` } : null)
+                                                            toast({ title: "Success", description: "File imported!" })
+                                                        } catch {
                                                             toast({ title: "Error", description: "Failed to read file", variant: "destructive" })
                                                         } finally {
                                                             setSaving(false)
-                                                            // Reset input
                                                             e.target.value = ''
                                                         }
                                                     }}
                                                 />
+                                                <Button variant="outline" size="sm" asChild>
+                                                    <span>Upload File</span>
+                                                </Button>
                                             </label>
                                         </div>
                                     </div>
-                                </CardContent>
-                            </Card>
 
-                            <Card className="rounded-xl shadow-sm border-0 bg-white">
-                                <CardHeader>
-                                    <CardTitle className="text-base">Business Knowledge</CardTitle>
-                                    <CardDescription>Information the AI uses to answer questions about your business</CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-4">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="space-y-2">
-                                            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Business Information</Label>
-                                            <textarea
-                                                className="flex min-h-[100px] w-full rounded-xl border border-input bg-slate-50/50 px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                                value={wiki.business_info || ''}
-                                                onChange={(e) => setWiki(prev => prev ? { ...prev, business_info: e.target.value } : null)}
-                                                placeholder="Company name, hours, location... (Populated by scraper)"
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label className="text-xs uppercase tracking-wider text-muted-foreground">FAQs</Label>
-                                            <textarea
-                                                className="flex min-h-[100px] w-full rounded-xl border border-input bg-slate-50/50 px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                                value={wiki.faqs || ''}
-                                                onChange={(e) => setWiki(prev => prev ? { ...prev, faqs: e.target.value } : null)}
-                                                placeholder="Q: What are your hours?..."
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Procedures</Label>
-                                            <textarea
-                                                className="flex min-h-[100px] w-full rounded-xl border border-input bg-slate-50/50 px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                                value={wiki.procedures || ''}
-                                                onChange={(e) => setWiki(prev => prev ? { ...prev, procedures: e.target.value } : null)}
-                                                placeholder="How to process refunds... (Populated by file upload)"
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Conflict Handling</Label>
-                                            <textarea
-                                                className="flex min-h-[100px] w-full rounded-xl border border-input bg-slate-50/50 px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                                                value={wiki.conflict_handling || ''}
-                                                onChange={(e) => setWiki(prev => prev ? { ...prev, conflict_handling: e.target.value } : null)}
-                                                placeholder="How to de-escalate..."
-                                            />
-                                        </div>
+                                    {/* Single Knowledge Text Area */}
+                                    <div className="space-y-2">
+                                        <Label className="text-sm font-medium">Your Business Knowledge</Label>
+                                        <p className="text-xs text-muted-foreground mb-2">
+                                            Add all information your AI should know: company info, FAQs, policies, procedures, pricing, etc.
+                                        </p>
+                                        <textarea
+                                            className="flex min-h-[400px] w-full rounded-xl border border-input bg-white px-4 py-3 text-sm resize-none focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono"
+                                            value={wiki.business_info || ''}
+                                            onChange={(e) => setWiki(prev => prev ? { ...prev, business_info: e.target.value } : null)}
+                                            placeholder={`Enter your business knowledge here. Example:
+
+Company Name: Flowcore AI
+Hours: Mon-Fri 9AM-6PM
+Location: 123 Main St, City
+
+Services:
+- AI Customer Support
+- Appointment Scheduling
+- Lead Qualification
+
+Pricing:
+- Basic: $49/month
+- Pro: $99/month
+
+FAQs:
+Q: How do I reset my password?
+A: Click "Forgot Password" on the login page.
+
+Q: What's your refund policy?
+A: Full refund within 30 days.`}
+                                        />
                                     </div>
-                                    <Button onClick={handleSaveWiki} disabled={saving} className="w-full">
-                                        <Save className="h-4 w-4 mr-2" />
-                                        {saving ? "Saving..." : "Save Knowledge Base"}
-                                    </Button>
                                 </CardContent>
                             </Card>
                         </div>
                     </div>
                 )}
+
 
                 {/* Voice Agents (Coming Soon) */}
                 {viewMode === 'voice-agents' && (
@@ -969,105 +903,6 @@ export default function AgentsPage() {
                     </div>
                 )}
 
-                {/* Knowledge Base View */}
-                {viewMode === 'knowledge-base' && wiki && (
-                    <div className="p-8">
-                        <div className="max-w-5xl mx-auto space-y-8">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <h1 className="text-2xl font-semibold tracking-tight text-foreground">Knowledge Base</h1>
-                                    <p className="text-muted-foreground text-sm mt-1">Manage the intelligence source for your agents.</p>
-                                </div>
-                                <Button onClick={handleSaveWiki} disabled={saving} size="sm">
-                                    <Save className="h-4 w-4 mr-2" />
-                                    {saving ? "Saving..." : "Save Changes"}
-                                </Button>
-                            </div>
-
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                                {/* Left Column: Data Sources */}
-                                <div className="space-y-6">
-                                    <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Data Sources</h2>
-
-                                    {/* Website Import Card */}
-                                    <Card className="rounded-xl border shadow-sm">
-                                        <CardHeader className="pb-3">
-                                            <div className="flex items-center gap-3">
-                                                <div className="h-8 w-8 rounded-full border bg-slate-50 flex items-center justify-center text-muted-foreground">
-                                                    <Bot className="h-4 w-4" />
-                                                </div>
-                                                <div>
-                                                    <CardTitle className="text-sm font-medium">Website Import</CardTitle>
-                                                    <CardDescription className="text-[10px]">Scrape public business info</CardDescription>
-                                                </div>
-                                            </div>
-                                        </CardHeader>
-                                        <CardContent className="pt-0">
-                                            <div className="flex gap-2">
-                                                <Input
-                                                    placeholder="https://example.com"
-                                                    className="h-9 text-sm"
-                                                />
-                                                <Button variant="outline" size="sm" className="h-9 px-3">
-                                                    Fetch
-                                                </Button>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-
-                                    {/* File Upload Card */}
-                                    <Card className="rounded-xl border shadow-sm">
-                                        <CardHeader className="pb-3">
-                                            <div className="flex items-center gap-3">
-                                                <div className="h-8 w-8 rounded-full border bg-slate-50 flex items-center justify-center text-muted-foreground">
-                                                    <Bot className="h-4 w-4" />
-                                                </div>
-                                                <div>
-                                                    <CardTitle className="text-sm font-medium">Document Upload</CardTitle>
-                                                    <CardDescription className="text-[10px]">PDF, DOCX, TXT supported</CardDescription>
-                                                </div>
-                                            </div>
-                                        </CardHeader>
-                                        <CardContent className="pt-0">
-                                            <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-50 hover:border-foreground/20 transition-all">
-                                                <div className="flex flex-col items-center justify-center pt-2 pb-3">
-                                                    <p className="mb-1 text-xs text-muted-foreground"><span className="font-semibold">Click to upload</span> or drag and drop</p>
-                                                    <p className="text-[10px] text-muted-foreground/50">MAX. 10MB</p>
-                                                </div>
-                                                <input type="file" className="hidden" />
-                                            </label>
-                                        </CardContent>
-                                    </Card>
-                                </div>
-
-                                {/* Center/Right Column: Editors */}
-                                <div className="lg:col-span-2 space-y-6">
-                                    <div className="border-b pb-2 flex gap-6">
-                                        <button className="pb-2 text-sm font-medium text-foreground border-b-2 border-foreground">
-                                            Business Info
-                                        </button>
-                                        <button className="pb-2 text-sm font-medium text-muted-foreground hover:text-foreground">
-                                            FAQs
-                                        </button>
-                                        <button className="pb-2 text-sm font-medium text-muted-foreground hover:text-foreground">
-                                            Procedures
-                                        </button>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <Label className="text-xs text-muted-foreground uppercase tracking-wider">Core Business Knowledge</Label>
-                                        <textarea
-                                            className="w-full min-h-[400px] font-mono text-sm leading-relaxed bg-white border border-slate-200 rounded-lg p-4 resize-none focus:ring-1 focus:ring-foreground focus:border-foreground outline-none"
-                                            placeholder="# Business Overview..."
-                                            value={wiki.business_info || ''}
-                                            onChange={(e) => setWiki(prev => prev ? { ...prev, business_info: e.target.value } : null)}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
             </div>
         </div>
     )

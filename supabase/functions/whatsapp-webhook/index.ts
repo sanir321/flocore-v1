@@ -1,13 +1,56 @@
 // @ts-nocheck
 // supabase/functions/whatsapp-webhook/index.ts
-// Receives incoming WhatsApp messages from Twilio and processes them
+// HARDENED VERSION: Receives incoming WhatsApp messages with signature validation
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-twilio-signature',
+}
+
+// Twilio signature validation
+async function validateTwilioSignature(
+    req: Request,
+    authToken: string
+): Promise<boolean> {
+    const signature = req.headers.get('x-twilio-signature')
+    if (!signature) {
+        console.warn('[Webhook] Missing X-Twilio-Signature header')
+        return false
+    }
+
+    // Get the full URL that Twilio called
+    const url = req.url
+
+    // Get the form data as sorted key-value pairs
+    const formData = await req.clone().formData()
+    const params: Record<string, string> = {}
+    formData.forEach((value, key) => {
+        params[key] = value.toString()
+    })
+
+    // Sort keys and concatenate
+    const sortedKeys = Object.keys(params).sort()
+    let dataString = url
+    for (const key of sortedKeys) {
+        dataString += key + params[key]
+    }
+
+    // Create HMAC-SHA1 signature
+    const encoder = new TextEncoder()
+    const key = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(authToken),
+        { name: 'HMAC', hash: 'SHA-1' },
+        false,
+        ['sign']
+    )
+    const signatureBytes = await crypto.subtle.sign('HMAC', key, encoder.encode(dataString))
+    const expectedSignature = btoa(String.fromCharCode(...new Uint8Array(signatureBytes)))
+
+    return signature === expectedSignature
 }
 
 serve(async (req: Request) => {
@@ -16,62 +59,77 @@ serve(async (req: Request) => {
         return new Response('ok', { headers: corsHeaders })
     }
 
+    // Early validation of required environment variables
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    const twilioAuthToken = Deno.env.get('TWILIO_AUTH_TOKEN')
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+        console.error('[Webhook] Missing Supabase environment variables')
+        return new Response('Server configuration error', { status: 500 })
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
     try {
         // 1. Get workspace_id from URL params
         const url = new URL(req.url)
         const workspace_id = url.searchParams.get('workspace_id')
 
         if (!workspace_id) {
-            console.error('Missing workspace_id parameter')
+            console.error('[Webhook] Missing workspace_id parameter')
             return new Response('Missing workspace_id', { status: 400 })
         }
 
-        // 2. Parse Twilio webhook data
+        // 2. SECURITY: Validate Twilio Signature (if auth token configured)
+        if (twilioAuthToken) {
+            const isValid = await validateTwilioSignature(req.clone(), twilioAuthToken)
+            if (!isValid) {
+                console.error('[Webhook] Invalid Twilio signature - possible spoofing attempt')
+                await supabase.from('audit_logs').insert({
+                    workspace_id: workspace_id,
+                    entity_type: 'security',
+                    action: 'invalid_webhook_signature',
+                    details: { url: req.url, headers: Object.fromEntries(req.headers) }
+                })
+                return new Response('Forbidden', { status: 403, headers: corsHeaders })
+            }
+            console.log('[Webhook] Twilio signature validated successfully')
+        } else {
+            console.warn('[Webhook] TWILIO_AUTH_TOKEN not set - skipping signature validation')
+        }
+
+        // 3. Parse Twilio webhook data
         const formData = await req.formData()
-        const from = formData.get('From') as string // Format: whatsapp:+919876543210
+        const from = formData.get('From') as string
         const body = formData.get('Body') as string
         const messageSid = formData.get('MessageSid') as string
         const mediaUrl = formData.get('MediaUrl0') as string | null
 
-        console.log(`[Webhook] Received message from ${from}: "${body}"`)
+        console.log(`[Webhook] Received message from ${from}: "${body?.substring(0, 50)}..."`)
 
         if (!from || !body) {
-            console.error('Missing From or Body in webhook')
+            console.error('[Webhook] Missing From or Body in webhook')
             return new Response('Missing required fields', { status: 400 })
         }
 
         // Extract phone number (remove 'whatsapp:' prefix)
         const phoneNumber = from.replace('whatsapp:', '')
 
-        // 3. Initialize Supabase with SERVICE ROLE KEY (for backend operations)
-        const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-        const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-
-        const supabase = createClient(supabaseUrl, supabaseServiceKey)
-
-        // 3.5 Check connection status and mark as connected if needed (Verification Step)
-        // This is a "heartbeat" check - if we receive a message, the webhook is working.
-        const { error: connectionError } = await supabase
+        // 4. Connection heartbeat
+        await supabase
             .from('whatsapp_connections')
             .update({ connected: true })
             .eq('workspace_id', workspace_id)
-            .eq('connected', false) // Only update if currently marked as false/pending
+            .eq('connected', false)
 
-        if (connectionError) {
-            console.error('[Webhook] Failed to update connection status:', connectionError)
-        } else {
-            console.log('[Webhook] Connection verified (received message)')
-        }
-
-        // 4. Find or create contact
+        // 5. Find or create contact
         let { data: contact } = await supabase
             .from('contacts')
             .select('id, name')
             .eq('workspace_id', workspace_id)
             .eq('phone', phoneNumber)
             .single()
-
-        console.log(`[Webhook] Step 4 - Contact Check: ${contact ? 'Found' : 'Not Found'}`)
 
         if (!contact) {
             const { data: newContact, error: contactError } = await supabase
@@ -86,23 +144,14 @@ serve(async (req: Request) => {
                 .single()
 
             if (contactError) {
-                console.error('Error creating contact:', contactError)
-                // Log granular error
-                await supabase.from('audit_logs').insert({
-                    workspace_id: workspace_id,
-                    resource_type: 'webhook_debug',
-                    action: 'contact_creation_failed',
-                    metadata: { error: contactError }
-                })
+                console.error('[Webhook] Error creating contact:', contactError)
                 throw contactError
             }
             contact = newContact
-            console.log(`[Webhook] Step 4 - New Contact Created: ${contact.id}`)
+            console.log(`[Webhook] New Contact Created: ${contact.id}`)
         }
 
-        console.log(`[Webhook] Contact ID: ${contact.id}`)
-
-        // 5. Find or create conversation
+        // 6. Find or create conversation
         let { data: conversation } = await supabase
             .from('conversations')
             .select('id, assigned_to_human, status, escalated')
@@ -113,8 +162,6 @@ serve(async (req: Request) => {
             .order('created_at', { ascending: false })
             .limit(1)
             .single()
-
-        console.log(`[Webhook] Step 5 - Conversation Check: ${conversation ? 'Found' : 'Not Found'}`)
 
         if (!conversation) {
             const { data: newConversation, error: convError } = await supabase
@@ -131,22 +178,14 @@ serve(async (req: Request) => {
                 .single()
 
             if (convError) {
-                console.error('Error creating conversation:', convError)
-                await supabase.from('audit_logs').insert({
-                    workspace_id: workspace_id,
-                    resource_type: 'webhook_debug',
-                    action: 'conversation_creation_failed',
-                    metadata: { error: convError }
-                })
+                console.error('[Webhook] Error creating conversation:', convError)
                 throw convError
             }
             conversation = newConversation
-            console.log(`[Webhook] Step 5 - New Conversation Created: ${conversation.id}`)
+            console.log(`[Webhook] New Conversation Created: ${conversation.id}`)
         }
 
-        console.log(`[Webhook] Conversation ID: ${conversation.id}`)
-
-        // 6. Store customer message with idempotency check
+        // 7. Store customer message with idempotency
         const { error: msgError } = await supabase
             .from('messages')
             .upsert({
@@ -160,85 +199,36 @@ serve(async (req: Request) => {
             })
 
         if (msgError) {
-            console.error('Error storing message:', msgError)
-            await supabase.from('audit_logs').insert({
-                workspace_id: workspace_id,
-                resource_type: 'webhook_debug',
-                action: 'message_storage_failed',
-                metadata: { error: msgError }
-            })
+            console.error('[Webhook] Error storing message:', msgError)
             throw msgError
-        } else {
-            console.log('[Webhook] Step 6 - Message stored successfully')
-            // Log success to audit for visibility
-            await supabase.from('audit_logs').insert({
-                workspace_id: workspace_id,
-                resource_type: 'webhook_debug',
-                action: 'message_stored',
-                metadata: { conversation_id: conversation.id, message_id: messageSid }
-            })
         }
 
-        // 7. Update conversation.last_message_at
+        console.log('[Webhook] Message stored successfully')
+
+        // 8. Update conversation metadata
         await supabase
             .from('conversations')
-            .update({ last_message_at: new Date().toISOString() })
+            .update({
+                last_message_at: new Date().toISOString(),
+                unread_count: (conversation as any).unread_count ? (conversation as any).unread_count + 1 : 1
+            })
             .eq('id', conversation.id)
 
-        // 8. If NOT assigned to human, trigger AI processing
-        if (!conversation.assigned_to_human) {
-            console.log('[Webhook] Triggering process-message...')
+        // 9. AI Processing is now handled by the queue system
+        // The trigger on messages table will automatically enqueue if assigned_to_human=false
+        console.log('[Webhook] Message enqueued for processing via trigger')
 
-            const processResponse = await fetch(
-                `${supabaseUrl}/functions/v1/process-message`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${supabaseServiceKey}`
-                    },
-                    body: JSON.stringify({
-                        workspace_id: workspace_id,
-                        conversation_id: conversation.id,
-                        message_content: body,
-                        customer_phone: phoneNumber,
-                        contact_name: contact.name
-                    })
-                }
-            )
-
-            if (!processResponse.ok) {
-                const errorText = await processResponse.text()
-                console.error('Error calling process-message:', errorText)
-                // Don't throw - we still want to acknowledge the webhook
-            } else {
-                console.log('[Webhook] process-message triggered successfully')
-            }
-        } else {
-            console.log('[Webhook] Conversation assigned to human - skipping AI')
-        }
-
-        // 9. Return empty TwiML response (Twilio expects this)
+        // 10. Return TwiML response
         const twiml = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
-
         return new Response(twiml, {
             status: 200,
-            headers: {
-                ...corsHeaders,
-                'Content-Type': 'text/xml'
-            }
+            headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
         })
 
     } catch (error: any) {
         console.error('[Webhook] Fatal error:', error)
 
-        // Log to audit_logs for debugging
         try {
-            const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-            const supabase = createClient(supabaseUrl, supabaseServiceKey)
-
-            // Extract workspace_id from URL if possible, or use fallback
             let workspace_id = 'unknown'
             try {
                 const url = new URL(req.url)
@@ -246,27 +236,24 @@ serve(async (req: Request) => {
             } catch { }
 
             await supabase.from('audit_logs').insert({
-                workspace_id: workspace_id !== 'unknown' ? workspace_id : '9c1d9589-bdb3-4743-8b50-d3aba94a5e17', // Use valid ID if unknown so insert doesn't fail on FK
-                resource_type: 'webhook_error',
+                workspace_id: workspace_id !== 'unknown' ? workspace_id : '9c1d9589-bdb3-4743-8b50-d3aba94a5e17',
+                entity_type: 'webhook_error',
                 action: 'failure',
-                metadata: {
+                details: {
                     error_message: error?.message || String(error),
                     error_stack: error?.stack,
                     timestamp: new Date().toISOString()
                 }
             })
         } catch (logError) {
-            console.error('Failed to log error to audit_logs:', logError)
+            console.error('[Webhook] Failed to log error:', logError)
         }
 
-        // Return empty TwiML even on error (prevents Twilio retries)
+        // Still return 200 to prevent Twilio retries
         const twiml = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
         return new Response(twiml, {
             status: 200,
-            headers: {
-                ...corsHeaders,
-                'Content-Type': 'text/xml'
-            }
+            headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
         })
     }
 })

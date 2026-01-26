@@ -219,7 +219,7 @@ serve(async (req: Request) => {
             .from('agents')
             .select('*')
             .eq('workspace_id', workspace_id)
-            .eq('is_active', true)
+            .eq('active', true)
             .single()
 
         if (!agent) {

@@ -14,6 +14,19 @@ import {
 } from 'lucide-react'
 import FlowCoreLoader from '@/components/ui/FlowCoreLoader'
 
+
+import {
+    Sheet,
+    SheetContent,
+    SheetHeader,
+    SheetTitle,
+    SheetDescription,
+    SheetFooter,
+} from '@/components/ui/sheet'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { useToast } from '@/hooks/use-toast'
+
 interface Contact {
     id: string
     name: string | null
@@ -21,13 +34,27 @@ interface Contact {
     email: string | null
     channel: string | null
     tags: string[] | null
+    metadata: any | null
     created_at: string | null
+    workspace_id: string
 }
 
 export default function ContactsPage() {
     const [contacts, setContacts] = useState<Contact[]>([])
     const [loading, setLoading] = useState(true)
     const [searchQuery, setSearchQuery] = useState('')
+    const { toast } = useToast()
+
+    // Sheet State
+    const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
+    const [isSheetOpen, setIsSheetOpen] = useState(false)
+    const [formData, setFormData] = useState({
+        name: '',
+        email: '',
+        phone: '',
+        tags: '',
+        notes: ''
+    })
 
     useEffect(() => {
         fetchContacts()
@@ -60,6 +87,83 @@ export default function ContactsPage() {
         }
     }
 
+    const openContact = (contact: Contact) => {
+        setSelectedContact(contact)
+        setFormData({
+            name: contact.name || '',
+            email: contact.email || '',
+            phone: contact.phone || '',
+            tags: contact.tags?.join(', ') || '',
+            notes: contact.metadata?.notes || ''
+        })
+        setIsSheetOpen(true)
+    }
+
+    const openNew = () => {
+        setSelectedContact(null)
+        setFormData({
+            name: '',
+            email: '',
+            phone: '',
+            tags: '',
+            notes: ''
+        })
+        setIsSheetOpen(true)
+    }
+
+    const handleSave = async () => {
+        if (!formData.phone) {
+            toast({ title: "Error", description: "Phone number is required", variant: "destructive" })
+            return
+        }
+
+        try {
+            const tagsArray = formData.tags.split(',').map(t => t.trim()).filter(Boolean)
+            const metadata = selectedContact?.metadata || {}
+            metadata.notes = formData.notes
+
+            const payload: any = {
+                name: formData.name,
+                email: formData.email,
+                phone: formData.phone,
+                tags: tagsArray,
+                metadata: metadata
+            }
+
+            // Get workspace ID if new
+            let wsId = selectedContact?.workspace_id
+            if (!wsId) {
+                const { data: { user } } = await supabase.auth.getUser()
+                const { data: workspace } = await supabase.from('workspaces').select('id').eq('owner_id', user!.id).single()
+                if (!workspace) throw new Error("Workspace not found")
+                wsId = workspace.id
+                payload.workspace_id = wsId
+            }
+
+            if (selectedContact?.id) {
+                // Update
+                const { error } = await supabase
+                    .from('contacts')
+                    .update(payload)
+                    .eq('id', selectedContact.id)
+                if (error) throw error
+                toast({ title: "Updated", description: "Contact updated successfully." })
+            } else {
+                // Insert
+                const { error } = await supabase
+                    .from('contacts')
+                    .insert(payload)
+                if (error) throw error
+                toast({ title: "Created", description: "Contact created successfully." })
+            }
+
+            setIsSheetOpen(false)
+            fetchContacts()
+        } catch (error: any) {
+            toast({ title: "Error", description: error.message, variant: "destructive" })
+        }
+    }
+
     const filteredContacts = useMemo(() => {
         return contacts.filter(contact => {
             const q = searchQuery.toLowerCase()
@@ -82,7 +186,7 @@ export default function ContactsPage() {
                     <h1 className="text-2xl font-bold tracking-tight text-foreground">Contacts</h1>
                     <p className="text-muted-foreground text-xs mt-1">Manage all your customer relationships.</p>
                 </div>
-                <Button size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm rounded-lg gap-2 text-xs h-8" disabled>
+                <Button size="sm" onClick={openNew} className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm rounded-lg gap-2 text-xs h-8">
                     <Plus className="h-3.5 w-3.5" />
                     New Contact
                 </Button>
@@ -123,7 +227,7 @@ export default function ContactsPage() {
                             <p className="text-sm text-muted-foreground max-w-xs mt-2">
                                 Add your first contact to start managing relationships.
                             </p>
-                            <Button className="mt-6 rounded-xl bg-primary hover:bg-primary/90">
+                            <Button className="mt-6 rounded-xl bg-primary hover:bg-primary/90" onClick={openNew}>
                                 <Plus className="h-4 w-4 mr-2" />
                                 Create Contact
                             </Button>
@@ -149,7 +253,8 @@ export default function ContactsPage() {
                         filteredContacts.map(contact => (
                             <div
                                 key={contact.id}
-                                className="grid grid-cols-12 gap-3 px-4 py-2 items-center hover:bg-muted/30 transition-colors rounded-lg group border border-transparent hover:border-border/30"
+                                onClick={() => openContact(contact)}
+                                className="grid grid-cols-12 gap-3 px-4 py-2 items-center hover:bg-muted/30 transition-colors rounded-lg group border border-transparent hover:border-border/30 cursor-pointer"
                             >
                                 {/* Name Column */}
                                 <div className="col-span-4 flex items-center gap-3">
@@ -212,6 +317,66 @@ export default function ContactsPage() {
                     )}
                 </div>
             </div>
+
+            <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
+                <SheetContent side="right" className="w-[400px] sm:w-[540px]">
+                    <SheetHeader>
+                        <SheetTitle>{selectedContact ? 'Edit Contact' : 'New Contact'}</SheetTitle>
+                        <SheetDescription>
+                            Update contact details, tags, and internal notes.
+                        </SheetDescription>
+                    </SheetHeader>
+                    <div className="py-6 space-y-6">
+                        <div className="space-y-2">
+                            <Label>Full Name</Label>
+                            <Input
+                                value={formData.name}
+                                onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                                placeholder="John Doe"
+                            />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label>Phone</Label>
+                                <Input
+                                    value={formData.phone}
+                                    onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                                    placeholder="+1234567890"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Email</Label>
+                                <Input
+                                    value={formData.email}
+                                    onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                                    placeholder="john@example.com"
+                                />
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Tags (comma separated)</Label>
+                            <Input
+                                value={formData.tags}
+                                onChange={(e) => setFormData(prev => ({ ...prev, tags: e.target.value }))}
+                                placeholder="VIP, Lead, Interested"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Internal Notes</Label>
+                            <Textarea
+                                value={formData.notes}
+                                onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                                placeholder="Add notes about specific preferences or history..."
+                                className="min-h-[100px]"
+                            />
+                        </div>
+                    </div>
+                    <SheetFooter>
+                        <Button variant="outline" onClick={() => setIsSheetOpen(false)}>Cancel</Button>
+                        <Button onClick={handleSave}>Save Changes</Button>
+                    </SheetFooter>
+                </SheetContent>
+            </Sheet>
         </div>
     )
 }

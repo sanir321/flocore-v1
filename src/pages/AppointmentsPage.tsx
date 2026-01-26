@@ -77,10 +77,15 @@ export default function AppointmentsPage() {
             // Ideally join profiles, but simplified for now: Owner + AI
             // If we had a generic 'members' list, we'd fetch it here.
             // For now, let's treat the owner as the primary member.
-            const { data: profile } = await supabase.from('profiles').select('id, full_name').eq('id', workspace.owner_id).single()
+            // Get Members (Owner + Workspace Members)
+            // Simplified: Owner + AI
+            const { data: { user } } = await supabase.auth.getUser()
 
-            const ownerMember = { id: profile?.id || workspace.owner_id, name: profile?.full_name || 'Me' }
-            const aiMember = { id: 'ai', name: 'AI Agent' } // Special ID for AI bookings
+            const ownerMember = {
+                id: workspace.owner_id,
+                name: user?.user_metadata?.full_name || user?.email || 'Me'
+            }
+            const aiMember = { id: 'ai', name: 'AI Agent' }
 
             const initialMembers = [ownerMember, aiMember]
             setMembers(initialMembers)
@@ -153,13 +158,50 @@ export default function AppointmentsPage() {
         const time = formData.get('time') as string
         const title = formData.get('title') as string
         const duration = parseInt(formData.get('duration') as string) || 60
+        const email = formData.get('email') as string
+        const phone = formData.get('phone') as string
 
         if (!date || !time || !title) return
 
         try {
             const startDateTime = new Date(`${date}T${time}`).toISOString()
 
-            // Insert into Supabase directly (Manual Entry)
+            // 1. Find or Create Contact
+            let contactId = null
+
+            // Try to find by email or phone
+            let query = supabase.from('contacts').select('id').eq('workspace_id', workspaceId)
+
+            if (email) {
+                query = query.eq('email', email)
+            } else if (phone) {
+                query = query.eq('phone', phone)
+            }
+
+            const { data: existingContacts } = await query.limit(1)
+
+            if (existingContacts && existingContacts.length > 0) {
+                contactId = existingContacts[0].id
+            } else {
+                // Create new contact
+                const { data: newContact, error: createError } = await supabase
+                    .from('contacts')
+                    .insert({
+                        workspace_id: workspaceId,
+                        name: title.split(' ')?.[0] || 'Unknown', // Rough guess at name from title if needed
+                        email: email || null,
+                        phone: phone || `manual_${Date.now()}`, // Fallback if no phone provided
+                        channel: 'manual',
+                        created_at: new Date().toISOString()
+                    })
+                    .select('id')
+                    .single()
+
+                if (createError) throw createError
+                contactId = newContact.id
+            }
+
+            // 2. Create Appointment
             const { error } = await supabase.from('appointments').insert({
                 workspace_id: workspaceId,
                 title,
@@ -168,9 +210,7 @@ export default function AppointmentsPage() {
                 status: 'booked',
                 booked_by: 'human', // Manual
                 metadata: { duration_minutes: duration },
-                contact_id: '00000000-0000-0000-0000-000000000000', // Placeholder for type check
-                // Note: We aren't creating a contact here yet to keep it simple, 
-                // but real app should find/create contact by email.
+                contact_id: contactId,
             } as any)
 
             if (error) throw error
@@ -309,6 +349,10 @@ export default function AppointmentsPage() {
                         <div className="space-y-2">
                             <Label>Email (Optional)</Label>
                             <Input name="email" type="email" placeholder="client@example.com" />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Phone (Optional)</Label>
+                            <Input name="phone" type="tel" placeholder="+1234567890" />
                         </div>
                         <div className="space-y-2">
                             <Label>Duration (Min)</Label>
