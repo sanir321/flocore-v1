@@ -67,7 +67,6 @@ export default function AppointmentsPage() {
     const [isAddOpen, setIsAddOpen] = useState(false)
     const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
     const [filterShow, setFilterShow] = useState('All')
-    const [filterDateRange, setFilterDateRange] = useState({ start: new Date(), end: addDays(new Date(), 7) })
     const { toast } = useToast()
     const { workspace, loading: workspaceLoading } = useWorkspace()
 
@@ -222,7 +221,7 @@ export default function AppointmentsPage() {
                 contact_id: contactId,
             } as any)
 
-            if (error) throw error
+            if (apptError) throw apptError
 
             toast({ title: "Success", description: "Appointment added manually." })
             setIsAddOpen(false)
@@ -269,7 +268,7 @@ export default function AppointmentsPage() {
     // --- 3. FILTER LOGIC ---
     const filteredAppointments = appointments.filter(apt => {
         // Filter by Member (booked_by logic)
-        const bookerId = (apt as any).booked_by === 'ai' ? 'ai' : workspace.owner_id
+        const bookerId = (apt as any).booked_by === 'ai' ? 'ai' : (workspace?.owner_id || '')
 
         // Filter Logic
         const matchesMember = selectedMembers.includes(bookerId) || ((apt as any).booked_by === 'human' && selectedMembers.some(m => m !== 'ai'))
@@ -354,6 +353,8 @@ export default function AppointmentsPage() {
                         handleCancel={handleCancel}
                         handleCopyLink={handleCopyLink}
                         openAddModal={() => setIsAddOpen(true)}
+                        filterShow={filterShow}
+                        setFilterShow={setFilterShow}
                     />
                 ) : (
                     <AppointmentsCalendarView
@@ -407,7 +408,7 @@ export default function AppointmentsPage() {
     )
 }
 
-function AppointmentsListView({ appointments, handleCancel, handleCopyLink, openAddModal }: any) {
+function AppointmentsListView({ appointments, handleCancel, handleCopyLink, openAddModal, filterShow, setFilterShow }: any) {
     return (
         <div className="p-4 md:p-8 h-full overflow-auto pt-16 md:pt-8">
             <div className="flex items-center justify-between mb-6">
@@ -424,8 +425,14 @@ function AppointmentsListView({ appointments, handleCancel, handleCopyLink, open
             {/* ... Filters Bar & List (same as before) ... */}
             <div className="flex items-center gap-2 mb-6 text-sm">
                 <span className="text-muted-foreground">Show</span>
-                <select className="border rounded px-2 py-1 bg-background text-sm">
-                    <option>All</option>
+                <select
+                    className="border rounded px-2 py-1 bg-background text-sm"
+                    value={filterShow}
+                    onChange={(e) => setFilterShow(e.target.value)}
+                >
+                    <option value="All">All</option>
+                    <option value="Upcoming">Upcoming</option>
+                    <option value="Cancelled">Cancelled</option>
                 </select>
                 <span className="text-muted-foreground ml-2">during</span>
                 <button className="border rounded px-3 py-1 bg-background text-sm">
@@ -503,19 +510,18 @@ function AppointmentsCalendarView({ appointments, currentDate, setCurrentDate }:
                     <div className="border-b border-r py-2"></div>
                     {days.map(d => <div key={d.toISOString()} className="border-b border-r py-3 text-center sticky top-0 bg-white z-10">{format(d, 'EEE d')}</div>)}
                     {hours.map(h => (
-                        import {Fragment} from 'react' as any // Just using Fragment
-                    <div key={h} className="contents">
-                        <div className="border-r border-b h-[60px] text-xs text-right pr-2 pt-2">{h > 12 ? h - 12 : h} {h >= 12 ? 'PM' : 'AM'}</div>
-                        {days.map(d => (
-                            <div key={d.toISOString() + h} className="border-r border-b h-[60px] relative">
-                                {weekAppointments.filter((a: any) => isSameDay(parseISO(a.scheduled_at), d) && getHours(parseISO(a.scheduled_at)) === h).map((a: any) => (
-                                    <div key={a.id} className="absolute bg-primary/10 border-l-4 border-primary rounded-r text-xs p-1 overflow-hidden z-10" style={getAppointmentStyle(a)}>
-                                        {a.title}
-                                    </div>
-                                ))}
-                            </div>
-                        ))}
-                    </div>
+                        <div key={h} className="contents">
+                            <div className="border-r border-b h-[60px] text-xs text-right pr-2 pt-2">{h > 12 ? h - 12 : h} {h >= 12 ? 'PM' : 'AM'}</div>
+                            {days.map(d => (
+                                <div key={d.toISOString() + h} className="border-r border-b h-[60px] relative">
+                                    {weekAppointments.filter((a: any) => isSameDay(parseISO(a.scheduled_at), d) && getHours(parseISO(a.scheduled_at)) === h).map((a: any) => (
+                                        <div key={a.id} className="absolute bg-primary/10 border-l-4 border-primary rounded-r text-xs p-1 overflow-hidden z-10" style={getAppointmentStyle(a)}>
+                                            {a.title}
+                                        </div>
+                                    ))}
+                                </div>
+                            ))}
+                        </div>
                     ))}
                 </div>
             </div>

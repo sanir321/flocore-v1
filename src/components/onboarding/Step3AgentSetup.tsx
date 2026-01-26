@@ -273,10 +273,10 @@ export default function Step3AgentSetup({ data }: Step3Props) {
                     <div className="relative w-full max-w-[320px] md:max-w-[600px] h-[450px] perspective-[1000px] mx-auto">
 
                         {/* Navigation Arrows */}
-                        <button onClick={handlePrev} className="absolute left-0 top-1/2 -translate-y-1/2 z-30 w-10 h-10 md:w-12 md:h-12 rounded-full bg-[#1A1A1A]/80 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 hover:scale-110 transition-all backdrop-blur-sm shadow-lg">
+                        <button onClick={handlePrev} className="absolute -left-2 md:-left-12 top-1/2 -translate-y-1/2 z-30 w-10 h-10 md:w-12 md:h-12 rounded-full bg-[#1A1A1A]/80 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 hover:scale-110 transition-all backdrop-blur-sm shadow-lg">
                             <ChevronLeft className="w-5 h-5 md:w-6 md:h-6" />
                         </button>
-                        <button onClick={handleNext} className="absolute right-0 top-1/2 -translate-y-1/2 z-30 w-10 h-10 md:w-12 md:h-12 rounded-full bg-[#1A1A1A]/80 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 hover:scale-110 transition-all backdrop-blur-sm shadow-lg">
+                        <button onClick={handleNext} className="absolute -right-2 md:-right-12 top-1/2 -translate-y-1/2 z-30 w-10 h-10 md:w-12 md:h-12 rounded-full bg-[#1A1A1A]/80 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 hover:scale-110 transition-all backdrop-blur-sm shadow-lg">
                             <ChevronRight className="w-5 h-5 md:w-6 md:h-6" />
                         </button>
 
