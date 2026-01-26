@@ -1,19 +1,16 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { useDebounce } from '@/hooks/useDebounce'
+import { useWorkspace } from '@/context/WorkspaceContext'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
-import { formatDistanceToNow, isToday, isYesterday, format } from 'date-fns'
+import { formatDistanceToNow, format } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
     MessageSquare,
     Search,
-    User,
     Send,
     Inbox,
-    CheckCircle,
-    Clock,
-    Check,
-    Archive,
     PanelLeft,
     X,
 } from 'lucide-react'
@@ -21,6 +18,7 @@ import {
     sendEscalationNotification,
     sendMessageNotification
 } from '@/lib/notifications'
+import { api } from '@/lib/api'
 import FlowCoreLoader from '@/components/ui/FlowCoreLoader'
 // Removed specific UI imports to avoid build errors
 // Dropped DropdownMenu and Badge in favor of lucide-icons and standard spans to avoid missing dep errors
@@ -35,15 +33,16 @@ interface Contact {
     tags?: string[] | null
 }
 
+// --- REFACTOR: Use DB status values internally ---
 interface Conversation {
     id: string
-    status: 'open' | 'followup' | 'closed'
+    status: 'todo' | 'follow_up' | 'done' // Matches DB constraints
     escalated: boolean
     assigned_to_human: boolean
     last_message_at: string
     unread_count: number
     contact: Contact
-    messages?: { content: string }[] // For preview fetching
+    messages?: { content: string }[]
 }
 
 interface Message {
@@ -58,156 +57,144 @@ export default function InboxPage() {
     const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
     const [messages, setMessages] = useState<Message[]>([])
     const [newMessage, setNewMessage] = useState('')
-    const [loading, setLoading] = useState(true)
-    const [workspaceId, setWorkspaceId] = useState<string | null>(null)
+    const { workspace, loading: workspaceLoading } = useWorkspace()
 
+    // Restored missing state
     const [searchQuery, setSearchQuery] = useState('')
+    const debouncedSearchQuery = useDebounce(searchQuery, 300)
     const [activeSidebarFilter, setActiveSidebarFilter] = useState<'all' | 'mine'>('all')
+    const selectedConversationRef = useRef<Conversation | null>(null)
+    const messagesEndRef = useRef<HTMLDivElement>(null)
     const [isAiThinking, setIsAiThinking] = useState(false)
-    const [isInboxExpanded, setIsInboxExpanded] = useState(true)
+
+    // Auto-scroll to bottom behavior
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
 
     useEffect(() => {
-        let workspaceIdLocal: string | null = null
+        scrollToBottom()
+    }, [messages, isAiThinking])
 
-        const fetchConversations = async () => {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) return
+    // Keep ref in sync
+    useEffect(() => {
+        selectedConversationRef.current = selectedConversation
+    }, [selectedConversation])
 
-            const { data: workspace } = await supabase
-                .from('workspaces')
-                .select('id')
-                .eq('owner_id', user.id)
-                .single()
+    // Data Fetching & Realtime
+    useEffect(() => {
+        if (!workspace || workspaceLoading) return
 
-            if (!workspace) {
-                setLoading(false)
-                return
+        const fetchConversationsList = async () => {
+            const { data } = await supabase
+                .from('conversations')
+                .select('id, status, escalated, assigned_to_human, last_message_at, unread_count, contact:contacts(id, name, phone, email, channel, tags), messages(content)')
+                .eq('workspace_id', workspace.id)
+                .order('last_message_at', { ascending: false })
+
+            if (data) {
+                const mappedData = data.map((c: any) => ({
+                    ...c,
+                    // Ensure status is valid, default to todo if null/invalid
+                    status: (['todo', 'follow_up', 'done'].includes(c.status) ? c.status : 'todo'),
+                    messages: c.messages?.[0] ? [c.messages[0]] : []
+                }))
+                setConversations(mappedData as Conversation[])
             }
-
-            workspaceIdLocal = workspace.id
-            setWorkspaceId(workspace.id)
-
-            await fetchConversationsList(workspace.id)
-            setLoading(false)
         }
 
-        fetchConversations()
+        fetchConversationsList()
 
-        // Realtime Subscriptions
         const channel = supabase
             .channel('inbox-updates')
-            // Listen for Conversation updates (unread counts, status, escalation)
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations' },
                 (payload) => {
-                    console.log('[Realtime] Conversation update:', payload)
-                    if (workspaceIdLocal) fetchConversationsList(workspaceIdLocal)
-
+                    fetchConversationsList()
                     const newData = payload.new as any
-
-                    // Update selected conversation if it matches
-                    if (selectedConversation?.id === newData.id) {
+                    if (selectedConversationRef.current?.id === newData.id) {
                         setSelectedConversation(prev => ({ ...prev!, ...newData }))
+                        // If we are looking at it, it should be read
+                        if (newData.unread_count > 0) {
+                            supabase.from('conversations')
+                                .update({ unread_count: 0, last_read_at: new Date().toISOString() } as any)
+                                .eq('id', newData.id)
+                                .then(({ error }) => {
+                                    if (error) console.error("Failed to mark read (RT):", error)
+                                })
+                        }
                     }
 
-                    // Escalation Notification Logic
-                    const oldData = payload.old as any
-                    if (newData.escalated && !oldData.escalated) {
-                        const prefs = localStorage.getItem(`notification_settings_${workspaceIdLocal}`)
-                        const settings = prefs ? JSON.parse(prefs) : { escalation_alerts: true }
-                        if (settings.escalation_alerts) {
-                            sendEscalationNotification('Customer', newData.id)
-                        }
+                    if (newData.escalated && !(payload.old as any).escalated) {
+                        sendEscalationNotification('Customer', newData.id)
                     }
                 }
             )
-            // Listen for INSERT (New conversations)
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversations' },
-                () => { if (workspaceIdLocal) fetchConversationsList(workspaceIdLocal) }
+                () => fetchConversationsList()
             )
-            // Listen for INSERT (New Messages)
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' },
                 (payload) => {
-                    console.log('[Realtime] New message:', payload)
-                    if (workspaceIdLocal) fetchConversationsList(workspaceIdLocal)
-
-                    // If message belongs to selected conversation, update messages list
+                    fetchConversationsList()
                     const newMessage = payload.new as Message
-                    if (selectedConversation && (payload.new as any).conversation_id === selectedConversation.id) {
+                    if (selectedConversationRef.current?.id === (payload.new as any).conversation_id) {
                         setMessages(prev => {
-                            // Dedupe
                             if (prev.find(m => m.id === newMessage.id)) return prev
                             return [...prev, newMessage]
                         })
-                        // Stop thinking animation if AI replied
                         if (newMessage.sender === 'ai') setIsAiThinking(false)
-                    }
-
-                    // Notification Logic
-                    if (newMessage.sender === 'customer') {
-                        const prefs = localStorage.getItem(`notification_settings_${workspaceIdLocal}`)
-                        const settings = prefs ? JSON.parse(prefs) : { new_message_alerts: true }
-                        if (settings.new_message_alerts) {
-                            sendMessageNotification('Customer', newMessage.content || 'New message', (payload.new as any).conversation_id)
+                        // Mark read implicitly if open
+                        if (selectedConversationRef.current) {
+                            supabase.from('conversations')
+                                .update({ unread_count: 0, last_read_at: new Date().toISOString() } as any)
+                                .eq('id', selectedConversationRef.current.id)
+                                .then()
                         }
+                    }
+                    if (newMessage.sender === 'customer') {
+                        sendMessageNotification('Customer', newMessage.content, (payload.new as any).conversation_id)
                     }
                 }
             )
-            .subscribe((status) => {
-                console.log('[Realtime] Status:', status)
-            })
+            .subscribe()
 
         return () => { supabase.removeChannel(channel) }
-    }, [selectedConversation?.id]) // Re-subscribe if selected changes? No, this is global list. 
-    // Actually, we shouldn't depend on selectedConversation for the global channel, but we need it for message injection. 
-    // Better strategy: Global channel refreshes list. Individual channel (below) handles active chat.
-    // However, I merged logic above to ensure list stays fresh. Let's keep it simple.
+    }, [workspace, workspaceLoading])
 
-    // We already have a specific effect for fetching messages below.
-    // To avoid race conditions, let's keep the global channel focused on List Updates.
-
-    const fetchConversationsList = async (wsId: string) => {
-        const { data } = await supabase
-            .from('conversations')
-            .select(`
-                id, status, escalated, assigned_to_human, last_message_at, unread_count,
-                contact:contacts(id, name, phone, email, channel, tags),
-                messages(content)
-            `)
-            .eq('workspace_id', wsId)
-            .order('last_message_at', { ascending: false })
-
-        if (data) {
-            const mappedData = data.map((c: any) => ({
-                ...c,
-                status: c.status || 'open'
-            }))
-            setConversations(mappedData as Conversation[])
-        }
-    }
-
-    // Fetch Messages when conversation selected
+    // --- NEW: Fetch Messages for Selected Conversation ---
     useEffect(() => {
-        if (!selectedConversation) return
+        if (!selectedConversation) {
+            setMessages([])
+            return
+        }
+
         const fetchMessages = async () => {
-            const { data } = await supabase
+            const { data, error } = await supabase
                 .from('messages')
-                .select('id, content, sender, created_at')
+                .select('*')
                 .eq('conversation_id', selectedConversation.id)
                 .order('created_at', { ascending: true })
-            if (data) setMessages(data)
 
-            // Mark as read (optimistic + db)
-            if (selectedConversation.unread_count > 0) {
-                await supabase.rpc('mark_conversation_read', { conversation_id: selectedConversation.id })
-                // Update local list to remove badge
-                setConversations(prev => prev.map(c => c.id === selectedConversation.id ? { ...c, unread_count: 0 } : c))
+            if (error) {
+                console.error('Error fetching messages:', error)
+            } else {
+                setMessages(data as Message[])
+                // Mark as read on open
+                if (selectedConversation.unread_count > 0) {
+                    updateStatus(selectedConversation.id, selectedConversation.status, true)
+                }
             }
         }
+
         fetchMessages()
     }, [selectedConversation?.id])
 
     const handleSendMessage = async () => {
-        if (!newMessage.trim() || !selectedConversation) return
+        if (!newMessage.trim() || !selectedConversation || !workspace?.id) return
+
+        // Mark as read immediately when user interacts
+        if (selectedConversation.unread_count > 0) {
+            updateStatus(selectedConversation.id, selectedConversation.status, true)
+        }
 
         const tempId = Math.random().toString()
         const tempMsg: Message = { id: tempId, content: newMessage, sender: 'human', created_at: new Date().toISOString() }
@@ -215,7 +202,7 @@ export default function InboxPage() {
         const messageToSend = newMessage
         setNewMessage('')
 
-        if (!selectedConversation.assigned_to_human && selectedConversation.status === 'open') {
+        if (!selectedConversation.assigned_to_human && selectedConversation.status === 'todo') {
             setIsAiThinking(true)
         }
 
@@ -231,38 +218,34 @@ export default function InboxPage() {
         }
 
         if (selectedConversation.assigned_to_human && selectedConversation.contact?.phone) {
-            try {
-                await fetch(
-                    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-message`,
-                    {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-                        },
-                        body: JSON.stringify({
-                            workspace_id: workspaceId,
-                            conversation_id: selectedConversation.id,
-                            message: messageToSend,
-                            customer_phone: selectedConversation.contact.phone
-                        })
-                    }
-                )
-            } catch (err) {
-                console.error('Error sending WhatsApp:', err)
-            }
+            await api.sendMessage({
+                workspaceId: workspace.id,
+                conversationId: selectedConversation.id,
+                message: messageToSend,
+                customerPhone: selectedConversation.contact.phone
+            })
         }
 
-        if (selectedConversation.status === 'closed') {
-            updateStatus(selectedConversation.id, 'open')
+        // Reopen if closed/done
+        if (selectedConversation.status === 'done') {
+            updateStatus(selectedConversation.id, 'todo')
         }
     }
 
-    const updateStatus = async (id: string, newStatus: 'open' | 'followup' | 'closed') => {
-        setConversations(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c))
-        if (selectedConversation?.id === id) setSelectedConversation(prev => prev ? { ...prev, status: newStatus } : null)
-        await supabase.from('conversations').update({ status: newStatus }).eq('id', id)
+    const updateStatus = async (id: string, newStatus: 'todo' | 'follow_up' | 'done', resetUnread = false) => {
+        const updates: any = { status: newStatus }
+        if (resetUnread) {
+            updates.unread_count = 0
+            updates.last_read_at = new Date().toISOString()
+        }
+
+        setConversations(prev => prev.map(c => c.id === id ? { ...c, status: newStatus, ...(resetUnread ? { unread_count: 0 } : {}) } : c))
+        if (selectedConversation?.id === id) setSelectedConversation(prev => prev ? { ...prev, status: newStatus, ...(resetUnread ? { unread_count: 0 } : {}) } : null)
+
+        const { error } = await supabase.from('conversations').update(updates as any).eq('id', id)
+        if (error) console.error("Update Status Failed:", error)
     }
+
 
     const toggleHumanTakeover = async () => {
         if (!selectedConversation) return
@@ -271,25 +254,11 @@ export default function InboxPage() {
         await supabase.from('conversations').update({ assigned_to_human: newValue }).eq('id', selectedConversation.id)
     }
 
-    const isSameDay = (d1: Date, d2: Date) => {
-        return d1.getFullYear() === d2.getFullYear() &&
-            d1.getMonth() === d2.getMonth() &&
-            d1.getDate() === d2.getDate()
-    }
-
-    const formatMessageDate = (dateStr: string | null) => {
-        if (!dateStr) return 'Unknown'
-        const date = new Date(dateStr)
-        if (isToday(date)) return 'Today'
-        if (isYesterday(date)) return 'Yesterday'
-        return format(date, 'MMMM d, yyyy')
-    }
-
     // --- FILTER LOGIC ---
     const filteredConversations = useMemo(() => {
         return conversations.filter(c => {
-            if (searchQuery) {
-                const q = searchQuery.toLowerCase()
+            if (debouncedSearchQuery) {
+                const q = debouncedSearchQuery.toLowerCase()
                 const name = c.contact?.name?.toLowerCase() || ''
                 const phone = c.contact?.phone?.toLowerCase() || ''
                 if (!name.includes(q) && !phone.includes(q)) return false
@@ -301,354 +270,290 @@ export default function InboxPage() {
 
             return true
         })
-    }, [conversations, searchQuery, activeSidebarFilter])
+    }, [conversations, debouncedSearchQuery, activeSidebarFilter])
 
-    if (loading) return <FlowCoreLoader />
+    if (workspaceLoading) return <FlowCoreLoader />
 
     return (
-        <div className="flex h-screen bg-background overflow-hidden font-sans">
+        <div className="flex h-full bg-background overflow-hidden relative">
 
-            {/* --- COLUMN 1: SIDEBAR (Collapsible) --- */}
+            {/* COLUMN 1: INBOX LIST */}
             <div className={cn(
-                "flex-none border-r flex flex-col bg-card transition-all duration-300 ease-in-out overflow-hidden relative group",
-                isInboxExpanded ? "w-64" : "w-[60px]"
+                "w-[320px] flex-none border-r border-border bg-card/50 backdrop-blur-sm flex flex-col transition-all duration-300",
+                selectedConversation ? "hidden md:flex" : "flex w-full md:w-[320px]"
             )}>
-                {/* Header with Toggle */}
-                <div className="p-4 flex items-center justify-between border-b h-[60px]">
-                    {isInboxExpanded ? (
-                        <div className="flex items-center gap-2 overflow-hidden">
-                            <h2 className="font-semibold text-lg truncate">Your Inbox</h2>
-                        </div>
-                    ) : (
-                        <div className="flex justify-center w-full">
-                            <div className="h-6 w-6 rounded bg-primary text-white flex items-center justify-center font-bold text-xs">F</div>
-                        </div>
-                    )}
-
-                    {/* Collapse Button */}
-                    <button
-                        onClick={() => setIsInboxExpanded(!isInboxExpanded)}
-                        className={cn(
-                            "absolute right-3 top-3.5 p-1.5 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-all",
-                            !isInboxExpanded && "right-1/2 translate-x-1/2 top-3.5"
-                        )}
-                        title={isInboxExpanded ? "Collapse" : "Expand"}
-                    >
-                        <PanelLeft className="h-5 w-5" />
-                    </button>
-                </div>
-
-                <div className="px-3 flex flex-col gap-1 mt-4">
-                    <Button
-                        variant={activeSidebarFilter === 'all' ? "secondary" : "ghost"}
-                        className={cn(
-                            "justify-start font-normal transition-all relative",
-                            !isInboxExpanded && "justify-center px-0"
-                        )}
-                        onClick={() => setActiveSidebarFilter('all')}
-                        title="All conversations"
-                    >
-                        <Inbox className={cn("h-4 w-4", isInboxExpanded && "mr-2")} />
-                        {isInboxExpanded && "All conversations"}
-                        {isInboxExpanded && conversations.some(c => (c.unread_count || 0) > 0) && (
-                            <span className="ml-auto text-xs bg-muted px-1.5 py-0.5 rounded-full border">
-                                {conversations.reduce((acc, c) => acc + (c.unread_count || 0), 0)}
-                            </span>
-                        )}
-                    </Button>
-
-                    <Button
-                        variant={activeSidebarFilter === 'mine' ? "secondary" : "ghost"}
-                        className={cn(
-                            "justify-start font-normal text-muted-foreground transition-all",
-                            !isInboxExpanded && "justify-center px-0"
-                        )}
-                        onClick={() => setActiveSidebarFilter('mine')}
-                        title="Your conversations"
-                    >
-                        <User className={cn("h-4 w-4", isInboxExpanded && "mr-2")} />
-                        {isInboxExpanded && "Your conversations"}
-                    </Button>
-                </div>
-
-                <div className="mt-auto p-4 border-t">
-                    {isInboxExpanded && (
-                        <p className="text-xs text-muted-foreground text-center">Data Sync: <span className="text-emerald-500 font-medium">Active</span></p>
-                    )}
-                </div>
-            </div>
-
-            {/* --- MAIN AREA (Header + Content) --- */}
-            <div className="flex-1 flex flex-col min-w-0">
-
-                {/* 1. TOP HEADER */}
-                <div className="flex-none border-b bg-white h-[60px] flex items-center px-6 justify-between">
-                    <div className="flex items-center gap-4">
-                        <h1 className="text-lg font-semibold flex items-center gap-2">
-                            {activeSidebarFilter === 'all' ? 'All Conversations' : 'My Inbox'}
-                        </h1>
-                    </div>
-
-                    <div className="relative w-64">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                {/* Search Header */}
+                <div className="p-3 border-b border-border/40">
+                    <h1 className="text-lg font-bold tracking-tight mb-3 px-1">Inbox</h1>
+                    <div className="relative group">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground group-focus-within:text-primary transition-colors" />
                         <Input
-                            placeholder="Search..."
-                            className="pl-9 h-9"
+                            placeholder="Search messages..."
+                            className="pl-9 h-9 text-xs bg-background/50 border-transparent focus:bg-background focus:ring-1 focus:ring-primary/20 transition-all rounded-lg"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                         />
                     </div>
                 </div>
 
-                {/* 2. CONTENT BODY (Split Layout) */}
-                <div className="flex-1 flex overflow-hidden">
+                {/* Filters */}
+                <div className="flex items-center gap-2 p-3 px-4 overflow-x-auto no-scrollbar border-b border-border/20">
+                    <Button
+                        variant={activeSidebarFilter === 'all' ? 'default' : 'ghost'}
+                        size="sm"
+                        onClick={() => setActiveSidebarFilter('all')}
+                        className="rounded-full text-xs h-8 px-4"
+                    >
+                        All
+                    </Button>
+                    <Button
+                        variant={activeSidebarFilter === 'mine' ? 'default' : 'ghost'}
+                        size="sm"
+                        onClick={() => setActiveSidebarFilter('mine')}
+                        className="rounded-full text-xs h-8 px-4"
+                    >
+                        Assigned to me
+                    </Button>
+                </div>
 
-                    {filteredConversations.length === 0 && !searchQuery ? (
-                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50/50">
-                            <CheckCircle className="h-10 w-10 text-muted-foreground mb-4" />
-                            <h3 className="text-lg font-medium text-slate-900">No conversations</h3>
+                {/* Conversation List */}
+                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                    {workspaceLoading ? (
+                        <div className="space-y-3 pt-4">
+                            {[1, 2, 3].map(i => <div key={i} className="h-20 bg-muted/50 rounded-xl animate-pulse" />)}
+                        </div>
+                    ) : filteredConversations.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-64 text-center">
+                            <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-3">
+                                <Inbox className="h-6 w-6 text-muted-foreground" />
+                            </div>
+                            <p className="text-sm font-medium text-foreground">No conversations found</p>
+                            <p className="text-xs text-muted-foreground">Adjust filters or wait for new messages</p>
                         </div>
                     ) : (
-                        <>
-                            {/* LIST COLUMN (Restored width) */}
-                            <div className={cn(
-                                "flex-col overflow-auto border-r bg-slate-50/30 transition-all",
-                                selectedConversation ? "w-[350px] hidden md:flex" : "flex-1 md:w-[350px]"
-                            )}>
-                                <div className="divide-y divide-border/40">
-                                    {filteredConversations.map(conv => (
-                                        <div
-                                            key={conv.id}
-                                            onClick={() => setSelectedConversation(conv)}
-                                            className={cn(
-                                                "p-4 cursor-pointer hover:bg-slate-50 transition-colors group relative",
-                                                selectedConversation?.id === conv.id ? "bg-blue-50/50" : ""
-                                            )}
-                                        >
-                                            <div className="flex justify-between items-start mb-1">
-                                                <span className={cn("font-medium text-sm text-slate-900 truncate pr-2", (conv.unread_count || 0) > 0 && "font-bold")}>
-                                                    {conv.contact?.name || conv.contact?.phone}
-                                                </span>
-                                                <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                                                    {formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: true }).replace('about ', '')}
-                                                </span>
-                                            </div>
+                        filteredConversations.map(conv => (
+                            <button
+                                key={conv.id}
+                                onClick={() => {
+                                    setSelectedConversation(conv)
+                                    if (conv.unread_count > 0) {
+                                        updateStatus(conv.id, conv.status, true)
+                                    }
+                                }}
+                                className={cn(
+                                    "w-full text-left p-3 rounded-lg transition-all duration-200 border border-transparent group relative hover:shadow-sm",
+                                    selectedConversation?.id === conv.id
+                                        ? "bg-white shadow-sm border-border/50 ring-1 ring-border/50"
+                                        : "hover:bg-white/60"
+                                )}
+                            >
+                                <div className="flex justify-between items-start mb-1">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                        <span className={cn(
+                                            "font-medium text-xs text-foreground truncate group-hover:text-primary transition-colors",
+                                            conv.unread_count > 0 && "text-primary font-bold"
+                                        )}>
+                                            {conv.contact?.name || conv.contact?.phone || 'Unknown Contact'}
+                                        </span>
+                                        {/* OPTIONAL: Visualization of status but keeping clean for now */}
+                                    </div>
+                                    <span className="text-[9px] text-muted-foreground whitespace-nowrap ml-2">
+                                        {conv.last_message_at
+                                            ? formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: true }).replace('about ', '')
+                                            : ''}
+                                    </span>
+                                </div>
 
-                                            <div className="flex justify-between items-end">
-                                                <p className={cn(
-                                                    "text-xs line-clamp-2 leading-relaxed text-slate-500 pr-2",
-                                                    (conv.unread_count || 0) > 0 && "text-slate-900 font-medium"
-                                                )}>
-                                                    {conv.messages && conv.messages[0] ? conv.messages[0].content : "No messages yet"}
-                                                </p>
+                                <div className="flex justify-between items-end gap-2">
+                                    <p className={cn(
+                                        "text-[10px] line-clamp-2 leading-relaxed text-muted-foreground w-full",
+                                        conv.unread_count > 0 && "font-medium text-foreground"
+                                    )}>
+                                        {conv.messages?.[0]?.content || "No preview"}
+                                    </p>
 
-                                                {(conv.unread_count || 0) > 0 && (
-                                                    <div className="h-5 min-w-[1.25rem] px-1 rounded-full bg-blue-600 text-[10px] font-bold text-white flex items-center justify-center shadow-sm">
-                                                        {conv.unread_count}
-                                                    </div>
-                                                )}
-                                            </div>
+                                    {conv.unread_count > 0 && (
+                                        <span className="flex-none h-5 min-w-[1.25rem] px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center shadow-lg shadow-primary/20">
+                                            {conv.unread_count}
+                                        </span>
+                                    )}
+                                </div>
 
-                                            <div className="mt-2 flex gap-1">
-                                                <span className="px-1.5 py-0.5 bg-slate-100 text-[10px] rounded text-slate-600 border border-slate-200">
-                                                    WhatsApp
-                                                </span>
-                                            </div>
-                                        </div>
-                                    ))}
+                                {conv.status === 'done' && (
+                                    <div className="mt-1 flex items-center gap-1">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                                        <span className="text-[9px] text-muted-foreground">Resolved</span>
+                                    </div>
+                                )}
+
+                                <div className="absolute left-0 bottom-4 w-1 h-8 bg-primary rounded-r-md transition-all duration-300 opacity-0 -translate-x-full group-hover:translate-x-0 group-hover:opacity-100" />
+                            </button>
+                        ))
+                    )}
+                </div>
+            </div>
+
+            {/* COLUMN 2: CHAT AREA */}
+            <div className={cn(
+                "flex-1 flex flex-col bg-white/50 backdrop-blur-sm relative",
+                selectedConversation ? "flex absolute inset-0 md:static z-20" : "hidden md:flex"
+            )}>
+                {selectedConversation ? (
+                    <>
+                        {/* Chat Header */}
+                        <div className="flex-none h-14 px-4 border-b border-border/40 flex items-center justify-between bg-white/80 backdrop-blur-md sticky top-0 z-30">
+                            <div className="flex items-center gap-3">
+                                {/* Mobile Back Button */}
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="md:hidden -ml-2 text-muted-foreground h-8 w-8"
+                                    onClick={() => setSelectedConversation(null)}
+                                >
+                                    <PanelLeft className="h-4 w-4" />
+                                </Button>
+
+                                <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-primary to-orange-400 flex items-center justify-center text-white shadow-sm ring-2 ring-background">
+                                    <span className="font-bold text-xs">
+                                        {(selectedConversation.contact?.name?.[0] || selectedConversation.contact?.phone?.[0] || '?').toUpperCase()}
+                                    </span>
+                                </div>
+                                <div>
+                                    <h2 className="font-semibold text-foreground text-xs flex items-center gap-2">
+                                        {selectedConversation.contact?.name || selectedConversation.contact?.phone}
+                                        {selectedConversation.escalated && (
+                                            <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full border border-red-200 uppercase tracking-wider font-bold">Escalated</span>
+                                        )}
+                                    </h2>
+                                    <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+                                        <span className={cn(
+                                            "w-1.5 h-1.5 rounded-full",
+                                            selectedConversation.status === 'done' ? "bg-green-500" : "bg-yellow-400"
+                                        )} />
+                                        {selectedConversation.status === 'done' ? 'Resolved' : 'Open'}
+                                        <span className="text-border">|</span>
+                                        {selectedConversation.assigned_to_human ? 'Manual Mode' : 'AI Active'}
+                                    </p>
                                 </div>
                             </div>
 
-                            {/* CHAT COLUMN (Flex Grow - Bigger) */}
-                            <div className="flex-1 flex flex-col bg-white min-w-0">
-                                {selectedConversation ? (
-                                    <>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    size="sm"
+                                    variant={selectedConversation.status === 'done' ? "outline" : "default"}
+                                    onClick={() => updateStatus(selectedConversation.id, selectedConversation.status === 'done' ? 'todo' : 'done')}
+                                    className="h-8 text-xs rounded-lg"
+                                >
+                                    {selectedConversation.status === 'done' ? 'Reopen' : 'Resolve'}
+                                </Button>
 
-                                        {/* Chat Header */}
-                                        <div className="px-6 py-4 border-b flex items-center justify-between bg-white shadow-sm z-10">
-                                            <div className="flex items-center gap-4">
-                                                {/* Initials Avatar */}
-                                                <div className="h-12 w-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-md">
-                                                    <span className="font-bold text-lg">
-                                                        {(selectedConversation.contact?.name?.[0] || selectedConversation.contact?.phone?.[0] || '?').toUpperCase()}
-                                                    </span>
-                                                </div>
+                                <Button
+                                    size="sm"
+                                    onClick={toggleHumanTakeover}
+                                    className={cn(
+                                        "rounded-lg text-xs font-semibold h-8 shadow-sm transition-all",
+                                        selectedConversation.assigned_to_human
+                                            ? "bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border"
+                                            : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-primary/25"
+                                    )}
+                                >
+                                    {selectedConversation.assigned_to_human ? 'Resume AI' : 'Take Control'}
+                                </Button>
 
-                                                <div>
-                                                    <div className="flex items-center gap-2">
-                                                        <h2 className="font-bold text-slate-900 text-lg">
-                                                            {selectedConversation.contact?.name || selectedConversation.contact?.phone}
-                                                        </h2>
-                                                        {selectedConversation.contact?.tags?.map(tag => (
-                                                            <span key={tag} className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] rounded-full font-medium border border-slate-200">
-                                                                {tag}
-                                                            </span>
-                                                        ))}
-                                                    </div>
+                                <Button variant="ghost" size="icon" onClick={() => setSelectedConversation(null)}>
+                                    <X className="h-5 w-5 text-muted-foreground" />
+                                </Button>
+                            </div>
+                        </div>
 
-                                                    <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
-                                                        {selectedConversation.contact?.phone && (
-                                                            <span className="flex items-center gap-1 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
-                                                                <span className="opacity-50">📱</span> {selectedConversation.contact.phone}
-                                                            </span>
-                                                        )}
-                                                        {selectedConversation.contact?.email && (
-                                                            <span className="flex items-center gap-1 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
-                                                                <span className="opacity-50">📧</span> {selectedConversation.contact.email}
-                                                            </span>
-                                                        )}
-                                                        <span className={cn(
-                                                            "flex items-center gap-1 px-1.5 py-0.5 rounded border ml-1",
-                                                            selectedConversation.assigned_to_human
-                                                                ? "bg-orange-50 border-orange-100 text-orange-700"
-                                                                : "bg-emerald-50 border-emerald-100 text-emerald-700"
-                                                        )}>
-                                                            <div className={cn("h-1.5 w-1.5 rounded-full", selectedConversation.assigned_to_human ? "bg-orange-500" : "bg-emerald-500")}></div>
-                                                            {selectedConversation.assigned_to_human ? 'Human Mode' : 'AI Active'}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <Button
-                                                    variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                                                    onClick={() => updateStatus(selectedConversation.id, selectedConversation.status === 'closed' ? 'open' : 'closed')}
-                                                    title={selectedConversation.status === 'closed' ? "Reopen" : "Mark as Done"}
-                                                >
-                                                    {selectedConversation.status === 'closed' ? <Inbox className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-                                                </Button>
+                        {/* Messages Area */}
+                        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/50">
+                            {messages.map((msg) => {
+                                const isMe = msg.sender === 'human';
+                                const isAI = msg.sender === 'ai';
+                                const isSystem = msg.sender === 'system';
 
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => updateStatus(selectedConversation.id, 'followup')} title="Follow Up">
-                                                    <Clock className="h-4 w-4" />
-                                                </Button>
+                                if (isSystem) return (
+                                    <div key={msg.id} className="flex justify-center my-4">
+                                        <span className="text-[10px] font-mono text-muted-foreground bg-secondary px-3 py-1 rounded-full border border-border/50">
+                                            {msg.content}
+                                        </span>
+                                    </div>
+                                );
 
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => updateStatus(selectedConversation.id, 'closed')} title="Archive">
-                                                    <Archive className="h-4 w-4" />
-                                                </Button>
+                                return (
+                                    <div key={msg.id} className={cn("flex flex-col max-w-[80%]", (isMe || isAI) ? "ml-auto items-end" : "mr-auto items-start")}>
+                                        <div className={cn(
+                                            "rounded-xl px-4 py-2 text-xs shadow-sm relative group transition-all",
+                                            (isMe || isAI)
+                                                ? (isAI
+                                                    ? "bg-indigo-50 text-indigo-900 border border-indigo-100 rounded-tr-sm"
+                                                    : "bg-primary text-primary-foreground rounded-br-sm shadow-primary/10")
+                                                : "bg-white text-foreground border border-border rounded-bl-sm"
+                                        )}>
+                                            {isAI && <p className="text-[8px] font-bold text-indigo-400 mb-0.5 uppercase tracking-wider">AI Assistant</p>}
+                                            <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
 
-                                                {/* TAKE OVER BUTTON */}
-                                                <Button
-                                                    variant={selectedConversation.assigned_to_human ? "secondary" : "default"}
-                                                    size="sm"
-                                                    className={cn(
-                                                        "ml-2 rounded-xl text-xs font-medium",
-                                                        selectedConversation.assigned_to_human
-                                                            ? "bg-orange-100 text-orange-700 hover:bg-orange-200 border border-orange-200"
-                                                            : "bg-primary text-primary-foreground"
-                                                    )}
-                                                    onClick={toggleHumanTakeover}
-                                                >
-                                                    {selectedConversation.assigned_to_human ? '🙋 Release to AI' : '✋ Take Over'}
-                                                </Button>
-
-                                                <div className="w-px h-4 bg-border mx-1"></div>
-                                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedConversation(null)}><X className="h-4 w-4" /></Button>
-                                            </div>
-                                        </div>
-
-                                        {/* Messages */}
-                                        <div className="flex-1 overflow-auto p-6 space-y-4 bg-slate-50">
-                                            {messages.length === 0 && (
-                                                <div className="text-center text-xs text-muted-foreground py-10">This conversation is empty.</div>
-                                            )}
-                                            {messages.map((msg, index) => {
-                                                const isOperator = msg.sender === 'human'
-                                                const isAI = msg.sender === 'ai'
-                                                const isSystem = msg.sender === 'system'
-                                                const isCustomer = !isOperator && !isAI && !isSystem
-
-                                                // Date Separator Logic
-                                                const showDateSeparator = index === 0 || !isSameDay(new Date(msg.created_at || ''), new Date(messages[index - 1].created_at || ''))
-
-                                                return (
-                                                    <div key={msg.id}>
-                                                        {showDateSeparator && (
-                                                            <div className="text-center my-4">
-                                                                <span className="text-[10px] text-muted-foreground bg-slate-100 px-2 py-1 rounded-full uppercase tracking-wider font-medium">
-                                                                    {formatMessageDate(msg.created_at)}
-                                                                </span>
-                                                            </div>
-                                                        )}
-                                                        <div className={cn(
-                                                            "flex w-full mb-4",
-                                                            isSystem ? "justify-center" :
-                                                                (isOperator || isAI) ? "justify-end" : "justify-start"
-                                                        )}>
-                                                            <div className={cn(
-                                                                "max-w-[80%] px-4 py-3 text-sm shadow-sm border relative group flex flex-col",
-                                                                isSystem ? "bg-slate-100 text-slate-500 text-xs rounded-full px-3 py-1 border-transparent mb-2" : "rounded-2xl",
-
-                                                                isOperator ? "bg-blue-600 text-white border-blue-600 rounded-br-sm" : "",
-                                                                isAI ? "bg-purple-100 text-purple-900 border-purple-200 rounded-br-sm" : "",
-                                                                isCustomer ? "bg-white border-slate-200 text-slate-800 rounded-bl-sm" : ""
-                                                            )}>
-                                                                {(isAI) && <span className="block text-[10px] font-bold text-purple-600 mb-1 uppercase tracking-wide">AI Assistant</span>}
-
-                                                                <span>{msg.content}</span>
-
-                                                                {/* Timestamp */}
-                                                                {msg.created_at && !isSystem && (
-                                                                    <span className={cn(
-                                                                        "text-[10px] mt-1 block text-right opacity-70",
-                                                                        isOperator || isAI ? "text-purple-100/80" : "text-muted-foreground"
-                                                                    )}>
-                                                                        {format(new Date(msg.created_at), 'h:mm a')}
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                )
-                                            })}
-
-                                            {/* AI Typing Indicator */}
-                                            {isAiThinking && (
-                                                <div className="flex w-full justify-end mb-4 animate-in fade-in slide-in-from-bottom-2">
-                                                    <div className="bg-purple-50 border border-purple-100 text-purple-400 px-4 py-3 rounded-2xl rounded-br-sm shadow-sm flex items-center gap-1">
-                                                        <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                                                        <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                                                        <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce"></div>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Input Area */}
-                                        <div className="p-4 bg-white border-t">
-                                            <div className="relative flex items-end gap-2">
-                                                <div className="flex-1 relative">
-                                                    <Input
-                                                        placeholder="Type a reply..."
-                                                        className="pr-12 py-6 resize-none"
-                                                        value={newMessage}
-                                                        onChange={e => setNewMessage(e.target.value)}
-                                                        onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-                                                    />
-                                                    <Button
-                                                        size="icon"
-                                                        className="absolute right-1.5 top-1.5 h-9 w-9"
-                                                        onClick={handleSendMessage}
-                                                        disabled={!newMessage.trim()}
-                                                    >
-                                                        <Send className="h-4 w-4" />
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </>
-                                ) : (
-                                    // Empty State for Detail Column (when list exists but no selection)
-                                    <div className="flex-1 hidden md:flex items-center justify-center bg-slate-50 text-muted-foreground">
-                                        <div className="text-center p-8">
-                                            <MessageSquare className="h-10 w-10 mx-auto mb-3 opacity-10" />
-                                            <p className="text-sm opacity-50">Select a conversation to start chatting</p>
+                                            <span className={cn(
+                                                "text-[9px] absolute -bottom-4 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap text-muted-foreground",
+                                                (isMe || isAI) ? "right-0" : "left-0"
+                                            )}>
+                                                {format(new Date(msg.created_at || new Date()), 'h:mm a')}
+                                            </span>
                                         </div>
                                     </div>
-                                )}
+                                );
+                            })}
+
+                            {isAiThinking && (
+                                <div className="flex flex-col max-w-[80%] items-end ml-auto">
+                                    <div className="bg-indigo-50 border border-indigo-100 px-4 py-3 rounded-2xl rounded-tr-sm flex items-center gap-1.5">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce [animation-delay:-0.3s]" />
+                                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce [animation-delay:-0.15s]" />
+                                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" />
+                                    </div>
+                                </div>
+                            )}
+                            <div ref={messagesEndRef} />
+                        </div>
+
+                        <div className="p-3 bg-white border-t border-border/40">
+                            <div className="relative flex items-center gap-2 max-w-4xl mx-auto">
+                                <Input
+                                    value={newMessage}
+                                    onChange={e => setNewMessage(e.target.value)}
+                                    onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+                                    placeholder="Type a message..."
+                                    className="h-10 pl-4 pr-10 rounded-full border-border/60 focus:ring-primary/20 bg-slate-50 focus:bg-white transition-all shadow-sm text-xs"
+                                />
+                                <Button
+                                    size="icon"
+                                    className="absolute right-1 top-1 h-8 w-8 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm transition-transform hover:scale-105"
+                                    onClick={handleSendMessage}
+                                    disabled={!newMessage.trim()}
+                                >
+                                    <Send className="h-3.5 w-3.5" />
+                                </Button>
                             </div>
-                        </>
-                    )}
-                </div>
+                            <div className="text-center mt-2">
+                                <p className="text-[10px] text-muted-foreground">
+                                    Press <kbd className="font-sans px-1 py-0.5 bg-muted rounded border border-border">Enter</kbd> to send
+                                </p>
+                            </div>
+                        </div>
+                    </>
+                ) : (
+                    // Empty State
+                    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-grid-small-black/[0.05]">
+                        <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-indigo-50 to-blue-50 flex items-center justify-center mb-6 shadow-sm border border-white">
+                            <MessageSquare className="h-10 w-10 text-primary/50" />
+                        </div>
+                        <h2 className="text-2xl font-bold text-foreground mb-2">Select a conversation</h2>
+                        <p className="text-muted-foreground max-w-sm mx-auto">
+                            Choose a contact from the list to start chatting or view conversation history.
+                        </p>
+                    </div>
+                )}
             </div>
         </div>
     )

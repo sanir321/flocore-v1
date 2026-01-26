@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast'
 import { Bot, Save, Sparkles, Wrench, ArrowLeft, ChevronRight, MessageSquare, Mic, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import FlowCoreLoader from '@/components/ui/FlowCoreLoader'
+import type { Tables } from '@/types/database.types'
 
 interface Agent {
     id: string
@@ -109,6 +110,7 @@ export default function AgentsPage() {
     const [viewMode, setViewMode] = useState<ViewMode>('chat-agents')
     const [selectedTool, setSelectedTool] = useState<Tool | null>(null)
     const [isAgentsExpanded, setIsAgentsExpanded] = useState(true)
+    const [escalatedConversations, setEscalatedConversations] = useState<Tables<'conversations'>[]>([])
     const { toast } = useToast()
 
     useEffect(() => {
@@ -156,6 +158,17 @@ export default function AgentsPage() {
 
             if (rulesData) {
                 setEscalationRules(rulesData as unknown as EscalationRules)
+            }
+
+            const { data: escalatedData } = await supabase
+                .from('conversations')
+                .select('*')
+                .eq('workspace_id', workspace.id)
+                .not('escalation_reason', 'is', null)
+                .order('last_message_at', { ascending: false })
+
+            if (escalatedData) {
+                setEscalatedConversations(escalatedData)
             }
 
             setLoading(false)
@@ -811,69 +824,247 @@ export default function AgentsPage() {
                     </div>
                 )}
 
-                {/* Escalations View */}
-                {viewMode === 'escalations' && escalationRules && (
+                {/* Escalation Center View */}
+                {viewMode === 'escalations' && (
                     <div className="p-8">
-                        <div className="max-w-xl">
-                            <div className="mb-8">
-                                <h1 className="text-2xl font-semibold">Escalation Rules</h1>
-                                <p className="text-muted-foreground">When should conversations be handed over to humans?</p>
+                        <div className="max-w-6xl mx-auto">
+                            <div className="flex justify-between items-center mb-8">
+                                <div>
+                                    <h1 className="text-2xl font-semibold tracking-tight text-foreground">Escalation Center</h1>
+                                    <p className="text-muted-foreground text-sm mt-1">Monitor and manage conversations flagged for human attention.</p>
+                                </div>
                             </div>
 
-                            <Card className="rounded-xl border-0 shadow-sm">
-                                <CardContent className="p-6 space-y-6">
-                                    <div className="space-y-4">
-                                        <div className="flex items-start gap-3">
-                                            <input
-                                                type="checkbox"
-                                                id="rule-angry"
-                                                className="mt-1 rounded border-gray-300"
-                                                checked={escalationRules.angry_language}
-                                                onChange={(e) => setEscalationRules(prev => prev ? { ...prev, angry_language: e.target.checked } : null)}
-                                            />
-                                            <div>
-                                                <label htmlFor="rule-angry" className="font-medium block cursor-pointer">Angry Language</label>
-                                                <p className="text-sm text-muted-foreground">Escalate when user uses profanity or hostile language</p>
-                                            </div>
-                                        </div>
+                            {/* Tabs for Chat/Voice */}
+                            <div className="border-b mb-6">
+                                <div className="flex gap-6">
+                                    <button className="pb-3 text-sm font-medium text-foreground border-b-2 border-foreground">
+                                        Chat
+                                    </button>
+                                    <button className="pb-3 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                                        Voice
+                                    </button>
+                                </div>
+                            </div>
 
-                                        <div className="flex items-start gap-3">
-                                            <input
-                                                type="checkbox"
-                                                id="rule-pricing"
-                                                className="mt-1 rounded border-gray-300"
-                                                checked={escalationRules.pricing_dispute}
-                                                onChange={(e) => setEscalationRules(prev => prev ? { ...prev, pricing_dispute: e.target.checked } : null)}
-                                            />
-                                            <div>
-                                                <label htmlFor="rule-pricing" className="font-medium block cursor-pointer">Pricing Disputes</label>
-                                                <p className="text-sm text-muted-foreground">Escalate when user contests charges or refund policies</p>
-                                            </div>
-                                        </div>
+                            {/* Filters */}
+                            <div className="flex items-center gap-3 mb-6">
+                                <Button variant="outline" size="sm" className="h-9 text-sm bg-white">
+                                    All Types <ChevronRight className="h-3 w-3 ml-1 rotate-90" />
+                                </Button>
+                                <Button variant="outline" size="sm" className="h-9 text-sm bg-white">
+                                    Pending <ChevronRight className="h-3 w-3 ml-1 rotate-90" />
+                                </Button>
+                                <Button variant="outline" size="sm" className="h-9 text-sm bg-white">
+                                    ↓ Newest First <ChevronRight className="h-3 w-3 ml-1 rotate-90" />
+                                </Button>
+                                <div className="flex-1" />
+                                <span className="text-sm text-muted-foreground">0 escalations (filtered)</span>
+                            </div>
 
-                                        <div className="flex items-start gap-3">
-                                            <input
-                                                type="checkbox"
-                                                id="rule-human"
-                                                className="mt-1 rounded border-gray-300"
-                                                checked={escalationRules.human_request}
-                                                onChange={(e) => setEscalationRules(prev => prev ? { ...prev, human_request: e.target.checked } : null)}
-                                            />
+                            {/* Table Header */}
+                            <div className="grid grid-cols-4 gap-4 px-4 py-3 bg-slate-50 rounded-t-lg border text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                                <div>Escalation</div>
+                                <div>Type</div>
+                                <div>Severity</div>
+                                <div>Status</div>
+                            </div>
+
+                            {/* Escalations List or Empty State */}
+                            {escalatedConversations.length > 0 ? (
+                                <div className="bg-white border rounded-b-lg overflow-hidden">
+                                    {escalatedConversations.map(conv => (
+                                        <div key={conv.id} className="grid grid-cols-4 gap-4 px-4 py-4 border-b last:border-0 hover:bg-slate-50 transition-colors items-center">
                                             <div>
-                                                <label htmlFor="rule-human" className="font-medium block cursor-pointer">Human Request</label>
-                                                <p className="text-sm text-muted-foreground">Escalate when user explicitly asks to speak to a person</p>
+                                                <div className="font-medium text-sm text-foreground">{conv.escalation_reason}</div>
+                                                <div className="text-xs text-muted-foreground mt-0.5">ID: {conv.contact_id.slice(0, 8)}...</div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="capitalize text-sm text-foreground">{conv.channel || 'chat'}</span>
+                                            </div>
+                                            <div>
+                                                <span className="inline-flex items-center px-2 py-1 rounded-full bg-red-50 text-red-700 text-xs font-medium">
+                                                    High Priority
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className={cn(
+                                                    "inline-flex h-2 w-2 rounded-full",
+                                                    conv.status === 'open' ? "bg-green-500" : "bg-slate-300"
+                                                )} />
+                                                <span className="capitalize text-sm text-foreground">{conv.status || 'open'}</span>
                                             </div>
                                         </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="border border-t-0 rounded-b-lg bg-white p-16 text-center">
+                                    <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-slate-50 border flex items-center justify-center">
+                                        <AlertTriangle className="h-8 w-8 text-muted-foreground/50" />
+                                    </div>
+                                    <h3 className="text-xl font-semibold text-foreground mb-2">No escalations found</h3>
+                                    <p className="text-muted-foreground text-sm">No conversations have been flagged for human attention yet.</p>
+                                </div>
+                            )}
+
+                            {/* Escalation Rules Section */}
+                            {escalationRules && (
+                                <div className="mt-10 pt-8 border-t">
+                                    <h2 className="text-lg font-semibold mb-4">Escalation Rules</h2>
+                                    <Card className="rounded-xl border shadow-sm">
+                                        <CardContent className="p-6 space-y-4">
+                                            <div className="flex items-start gap-3">
+                                                <input
+                                                    type="checkbox"
+                                                    id="rule-angry"
+                                                    className="mt-1 rounded border-gray-300"
+                                                    checked={escalationRules.angry_language}
+                                                    onChange={(e) => setEscalationRules(prev => prev ? { ...prev, angry_language: e.target.checked } : null)}
+                                                />
+                                                <div>
+                                                    <label htmlFor="rule-angry" className="font-medium block cursor-pointer">Angry Language</label>
+                                                    <p className="text-sm text-muted-foreground">Escalate when user uses profanity or hostile language</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-start gap-3">
+                                                <input
+                                                    type="checkbox"
+                                                    id="rule-pricing"
+                                                    className="mt-1 rounded border-gray-300"
+                                                    checked={escalationRules.pricing_dispute}
+                                                    onChange={(e) => setEscalationRules(prev => prev ? { ...prev, pricing_dispute: e.target.checked } : null)}
+                                                />
+                                                <div>
+                                                    <label htmlFor="rule-pricing" className="font-medium block cursor-pointer">Pricing Disputes</label>
+                                                    <p className="text-sm text-muted-foreground">Escalate when user contests charges or refund policies</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-start gap-3">
+                                                <input
+                                                    type="checkbox"
+                                                    id="rule-human"
+                                                    className="mt-1 rounded border-gray-300"
+                                                    checked={escalationRules.human_request}
+                                                    onChange={(e) => setEscalationRules(prev => prev ? { ...prev, human_request: e.target.checked } : null)}
+                                                />
+                                                <div>
+                                                    <label htmlFor="rule-human" className="font-medium block cursor-pointer">Human Request</label>
+                                                    <p className="text-sm text-muted-foreground">Escalate when user explicitly asks to speak to a person</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="pt-4 border-t">
+                                                <Button onClick={handleSaveRules} disabled={saving} size="sm">
+                                                    <Save className="h-4 w-4 mr-2" />
+                                                    {saving ? "Saving..." : "Save Rules"}
+                                                </Button>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Knowledge Base View */}
+                {viewMode === 'knowledge-base' && wiki && (
+                    <div className="p-8">
+                        <div className="max-w-5xl mx-auto space-y-8">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h1 className="text-2xl font-semibold tracking-tight text-foreground">Knowledge Base</h1>
+                                    <p className="text-muted-foreground text-sm mt-1">Manage the intelligence source for your agents.</p>
+                                </div>
+                                <Button onClick={handleSaveWiki} disabled={saving} size="sm">
+                                    <Save className="h-4 w-4 mr-2" />
+                                    {saving ? "Saving..." : "Save Changes"}
+                                </Button>
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                {/* Left Column: Data Sources */}
+                                <div className="space-y-6">
+                                    <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Data Sources</h2>
+
+                                    {/* Website Import Card */}
+                                    <Card className="rounded-xl border shadow-sm">
+                                        <CardHeader className="pb-3">
+                                            <div className="flex items-center gap-3">
+                                                <div className="h-8 w-8 rounded-full border bg-slate-50 flex items-center justify-center text-muted-foreground">
+                                                    <Bot className="h-4 w-4" />
+                                                </div>
+                                                <div>
+                                                    <CardTitle className="text-sm font-medium">Website Import</CardTitle>
+                                                    <CardDescription className="text-[10px]">Scrape public business info</CardDescription>
+                                                </div>
+                                            </div>
+                                        </CardHeader>
+                                        <CardContent className="pt-0">
+                                            <div className="flex gap-2">
+                                                <Input
+                                                    placeholder="https://example.com"
+                                                    className="h-9 text-sm"
+                                                />
+                                                <Button variant="outline" size="sm" className="h-9 px-3">
+                                                    Fetch
+                                                </Button>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+
+                                    {/* File Upload Card */}
+                                    <Card className="rounded-xl border shadow-sm">
+                                        <CardHeader className="pb-3">
+                                            <div className="flex items-center gap-3">
+                                                <div className="h-8 w-8 rounded-full border bg-slate-50 flex items-center justify-center text-muted-foreground">
+                                                    <Bot className="h-4 w-4" />
+                                                </div>
+                                                <div>
+                                                    <CardTitle className="text-sm font-medium">Document Upload</CardTitle>
+                                                    <CardDescription className="text-[10px]">PDF, DOCX, TXT supported</CardDescription>
+                                                </div>
+                                            </div>
+                                        </CardHeader>
+                                        <CardContent className="pt-0">
+                                            <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-50 hover:border-foreground/20 transition-all">
+                                                <div className="flex flex-col items-center justify-center pt-2 pb-3">
+                                                    <p className="mb-1 text-xs text-muted-foreground"><span className="font-semibold">Click to upload</span> or drag and drop</p>
+                                                    <p className="text-[10px] text-muted-foreground/50">MAX. 10MB</p>
+                                                </div>
+                                                <input type="file" className="hidden" />
+                                            </label>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+
+                                {/* Center/Right Column: Editors */}
+                                <div className="lg:col-span-2 space-y-6">
+                                    <div className="border-b pb-2 flex gap-6">
+                                        <button className="pb-2 text-sm font-medium text-foreground border-b-2 border-foreground">
+                                            Business Info
+                                        </button>
+                                        <button className="pb-2 text-sm font-medium text-muted-foreground hover:text-foreground">
+                                            FAQs
+                                        </button>
+                                        <button className="pb-2 text-sm font-medium text-muted-foreground hover:text-foreground">
+                                            Procedures
+                                        </button>
                                     </div>
 
-                                    <div className="pt-4 border-t">
-                                        <Button onClick={handleSaveRules} disabled={saving} className="w-full sm:w-auto">
-                                            <Save className="h-4 w-4 mr-2" />
-                                            {saving ? "Saving..." : "Save Rules"}
-                                        </Button>
+                                    <div className="space-y-2">
+                                        <Label className="text-xs text-muted-foreground uppercase tracking-wider">Core Business Knowledge</Label>
+                                        <textarea
+                                            className="w-full min-h-[400px] font-mono text-sm leading-relaxed bg-white border border-slate-200 rounded-lg p-4 resize-none focus:ring-1 focus:ring-foreground focus:border-foreground outline-none"
+                                            placeholder="# Business Overview..."
+                                            value={wiki.business_info || ''}
+                                            onChange={(e) => setWiki(prev => prev ? { ...prev, business_info: e.target.value } : null)}
+                                        />
                                     </div>
-                                </CardContent>
-                            </Card>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}

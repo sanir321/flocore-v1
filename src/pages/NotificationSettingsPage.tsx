@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
-import { Save, Bell, AlertTriangle, Calendar, AtSign, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Save, Bell, AlertTriangle, Phone, CheckCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-    isNotificationSupported,
     getNotificationPermission,
     requestNotificationPermission,
     sendNotification
@@ -16,6 +19,8 @@ interface NotificationSettings {
     booking_confirmations: boolean
     mention_notifications: boolean
     new_message_alerts: boolean
+    admin_phone: string
+    whatsapp_alerts_enabled: boolean
 }
 
 export default function NotificationSettingsPage() {
@@ -23,7 +28,9 @@ export default function NotificationSettingsPage() {
         escalation_alerts: true,
         booking_confirmations: true,
         mention_notifications: true,
-        new_message_alerts: false
+        new_message_alerts: false,
+        admin_phone: '',
+        whatsapp_alerts_enabled: true
     })
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
@@ -32,7 +39,7 @@ export default function NotificationSettingsPage() {
     const { toast } = useToast()
 
     useEffect(() => {
-        // Check notification permission
+        // Check browser permission
         setPermissionStatus(getNotificationPermission())
 
         const fetchSettings = async () => {
@@ -51,10 +58,30 @@ export default function NotificationSettingsPage() {
             if (workspace) {
                 setWorkspaceId(workspace.id)
 
-                const saved = localStorage.getItem(`notification_settings_${workspace.id}`)
-                if (saved) {
-                    setSettings(JSON.parse(saved))
+                // 1. Load Local Browser Settings (for UI toggles)
+                const localSaved = localStorage.getItem(`notification_settings_${workspace.id}`)
+                let localSettings = {}
+                if (localSaved) {
+                    try {
+                        localSettings = JSON.parse(localSaved)
+                    } catch (e) {
+                        console.error('Failed to parse local settings', e)
+                    }
                 }
+
+                // 2. Load Server Settings (for WhatsApp Alerts)
+                const { data: serverData } = await supabase
+                    .from('notification_settings')
+                    .select('*')
+                    .eq('workspace_id', workspace.id)
+                    .single()
+
+                setSettings(prev => ({
+                    ...prev,
+                    ...localSettings,
+                    admin_phone: serverData?.admin_phone || '',
+                    whatsapp_alerts_enabled: serverData?.escalation_alerts ?? true
+                }))
             }
 
             setLoading(false)
@@ -68,17 +95,10 @@ export default function NotificationSettingsPage() {
         setPermissionStatus(getNotificationPermission())
 
         if (granted) {
-            toast({ title: "Success", description: "Notifications enabled!" })
-            // Send a test notification
+            toast({ title: "Success", description: "Browser notifications enabled!" })
             sendNotification({
                 title: '🎉 Notifications Enabled!',
                 body: 'You will now receive alerts for important events.',
-            })
-        } else {
-            toast({
-                title: "Permission Denied",
-                description: "Please enable notifications in your browser settings.",
-                variant: "destructive"
             })
         }
     }
@@ -88,31 +108,35 @@ export default function NotificationSettingsPage() {
         setSaving(true)
 
         try {
-            localStorage.setItem(`notification_settings_${workspaceId}`, JSON.stringify(settings))
-            toast({ title: "Success", description: "Notification preferences saved." })
-        } catch (error: any) {
-            toast({ title: "Error", description: error.message, variant: "destructive" })
+            // 1. Save Local Settings
+            const localData = {
+                escalation_alerts: settings.escalation_alerts,
+                booking_confirmations: settings.booking_confirmations,
+                mention_notifications: settings.mention_notifications,
+                new_message_alerts: settings.new_message_alerts
+            }
+            localStorage.setItem(`notification_settings_${workspaceId}`, JSON.stringify(localData))
+
+            // 2. Save Server Settings
+            const serverPayload = {
+                workspace_id: workspaceId,
+                admin_phone: settings.admin_phone,
+                escalation_alerts: settings.whatsapp_alerts_enabled
+            }
+
+            const { error } = await supabase
+                .from('notification_settings')
+                .upsert(serverPayload)
+
+            if (error) throw error
+
+            toast({ title: "Success", description: "All preferences saved successfully." })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'An unknown error occurred'
+            toast({ title: "Error", description: message, variant: "destructive" })
         } finally {
             setSaving(false)
         }
-    }
-
-    const handleTestNotification = () => {
-        if (permissionStatus !== 'granted') {
-            toast({
-                title: "Permission Required",
-                description: "Please enable notifications first.",
-                variant: "destructive"
-            })
-            return
-        }
-
-        sendNotification({
-            title: '🧪 Test Notification',
-            body: 'This is a test notification from Flowcore AI.',
-        })
-
-        toast({ title: "Sent!", description: "Check your notification panel." })
     }
 
     const toggleSetting = (key: keyof NotificationSettings) => {
@@ -121,156 +145,143 @@ export default function NotificationSettingsPage() {
 
     if (loading) {
         return (
-            <div className="flex h-full items-center justify-center">
+            <div className="flex h-64 items-center justify-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
         )
     }
 
-    const notificationOptions = [
-        {
-            key: 'escalation_alerts' as const,
-            icon: AlertTriangle,
-            title: 'Escalation Alerts',
-            description: 'Get notified when the AI agent escalates a conversation to you',
-            iconColor: 'text-orange-500',
-            bgColor: 'bg-orange-100'
-        },
-        {
-            key: 'booking_confirmations' as const,
-            icon: Calendar,
-            title: 'Booking Confirmations',
-            description: 'Get notified when a new appointment is booked',
-            iconColor: 'text-blue-500',
-            bgColor: 'bg-blue-100'
-        },
-        {
-            key: 'mention_notifications' as const,
-            icon: AtSign,
-            title: 'Mentions & Notes',
-            description: 'Get notified when you are mentioned in a note or conversation',
-            iconColor: 'text-purple-500',
-            bgColor: 'bg-purple-100'
-        },
-        {
-            key: 'new_message_alerts' as const,
-            icon: Bell,
-            title: 'New Message Alerts',
-            description: 'Get notified for every new customer message (can be noisy)',
-            iconColor: 'text-emerald-500',
-            bgColor: 'bg-emerald-100'
-        }
-    ]
-
     return (
-        <div className="p-6 max-w-2xl">
-            <div className="mb-6">
-                <h1 className="text-xl font-semibold">Notifications</h1>
-                <p className="text-sm text-muted-foreground mt-1">Choose what notifications you want to receive</p>
+        <div className="space-y-10 max-w-4xl">
+            <div>
+                <h1 className="text-3xl font-semibold tracking-tight text-foreground">Notification Preferences</h1>
+                <p className="text-muted-foreground text-base mt-2">Customize how and when you receive alerts.</p>
             </div>
 
-            {/* Permission Status Banner */}
-            <div className={cn(
-                "rounded-xl border p-4 mb-6 flex items-center gap-4",
-                permissionStatus === 'granted' && "bg-emerald-50 border-emerald-200",
-                permissionStatus === 'denied' && "bg-red-50 border-red-200",
-                permissionStatus === 'default' && "bg-amber-50 border-amber-200",
-                permissionStatus === 'unsupported' && "bg-muted border-muted"
-            )}>
-                <div className={cn(
-                    "w-10 h-10 rounded-xl flex items-center justify-center",
-                    permissionStatus === 'granted' && "bg-emerald-100",
-                    permissionStatus === 'denied' && "bg-red-100",
-                    permissionStatus === 'default' && "bg-amber-100",
-                    permissionStatus === 'unsupported' && "bg-muted"
-                )}>
-                    {permissionStatus === 'granted' && <CheckCircle className="h-5 w-5 text-emerald-600" />}
-                    {permissionStatus === 'denied' && <XCircle className="h-5 w-5 text-red-600" />}
-                    {permissionStatus === 'default' && <AlertCircle className="h-5 w-5 text-amber-600" />}
-                    {permissionStatus === 'unsupported' && <Bell className="h-5 w-5 text-muted-foreground" />}
-                </div>
-
-                <div className="flex-1">
-                    <div className="font-medium text-sm">
-                        {permissionStatus === 'granted' && 'Notifications Enabled'}
-                        {permissionStatus === 'denied' && 'Notifications Blocked'}
-                        {permissionStatus === 'default' && 'Enable Notifications'}
-                        {permissionStatus === 'unsupported' && 'Not Supported'}
+            {/* WhatsApp Admin Alerts */}
+            <Card className="rounded-xl border shadow-none hover:border-foreground/20 transition-all duration-300">
+                <CardHeader className="pb-5">
+                    <div className="flex items-center gap-5">
+                        <div className="w-14 h-14 rounded-full border bg-slate-50 flex items-center justify-center text-muted-foreground">
+                            <Phone className="h-6 w-6" />
+                        </div>
+                        <div>
+                            <CardTitle className="text-lg font-medium text-foreground">WhatsApp Admin Alerts</CardTitle>
+                            <CardDescription className="text-sm mt-1">Receive instant high-priority alerts on your personal WhatsApp.</CardDescription>
+                        </div>
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                        {permissionStatus === 'granted' && 'You will receive browser notifications for enabled events.'}
-                        {permissionStatus === 'denied' && 'Please enable notifications in your browser settings.'}
-                        {permissionStatus === 'default' && 'Allow browser notifications to receive alerts.'}
-                        {permissionStatus === 'unsupported' && 'Your browser does not support notifications.'}
+                </CardHeader>
+                <CardContent className="space-y-6 pt-0">
+                    <div className="flex items-center justify-between p-4 bg-slate-50/50 rounded-lg border border-slate-100">
+                        <Label htmlFor="wa-alerts" className="flex flex-col gap-1 cursor-pointer">
+                            <span className="font-medium text-sm">Enable WhatsApp Alerts</span>
+                            <span className="text-[11px] text-muted-foreground">The AI will message you directly for critical escalations.</span>
+                        </Label>
+                        <Switch
+                            id="wa-alerts"
+                            checked={settings.whatsapp_alerts_enabled}
+                            onCheckedChange={() => toggleSetting('whatsapp_alerts_enabled')}
+                            className="data-[state=checked]:bg-foreground"
+                        />
                     </div>
-                </div>
 
-                {permissionStatus === 'default' && (
-                    <Button onClick={handleRequestPermission} size="sm" className="rounded-xl">
-                        Enable
-                    </Button>
-                )}
+                    {settings.whatsapp_alerts_enabled && (
+                        <div className="animate-in fade-in slide-in-from-top-1 pl-1">
+                            <Label className="mb-2 block text-xs font-medium uppercase tracking-wider text-muted-foreground">Your Personal WhatsApp Number</Label>
+                            <div className="flex gap-3">
+                                <Input
+                                    value={settings.admin_phone}
+                                    onChange={(e) => setSettings(prev => ({ ...prev, admin_phone: e.target.value }))}
+                                    placeholder="+1234567890" // E.164 format
+                                    className="max-w-md font-mono text-sm h-9 bg-white"
+                                />
+                                <Button size="sm" variant="outline" onClick={handleSave} disabled={saving} className="h-9">
+                                    Save Number
+                                </Button>
+                            </div>
+                            <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed opacity-80">
+                                Must include country code (e.g. +1 or +91).<br />
+                                In Sandbox mode, this number must join your sandbox first. In Production, it works instantly.
+                            </p>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
 
-                {permissionStatus === 'granted' && (
-                    <Button onClick={handleTestNotification} variant="outline" size="sm" className="rounded-xl">
-                        Test
-                    </Button>
-                )}
-            </div>
-
-            {/* Notification Options */}
-            <div className="rounded-xl border bg-card divide-y">
-                {notificationOptions.map((option) => (
-                    <div
-                        key={option.key}
-                        className={cn(
-                            "p-4 flex items-center gap-4 transition-colors",
-                            permissionStatus === 'granted'
-                                ? "hover:bg-muted/50 cursor-pointer"
-                                : "opacity-50 cursor-not-allowed"
+            {/* Browser Notifications */}
+            <Card className="rounded-xl border shadow-none hover:border-foreground/20 transition-all duration-300">
+                <CardHeader className="pb-4">
+                    <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full border bg-slate-50 flex items-center justify-center text-muted-foreground">
+                            <Bell className="h-5 w-5" />
+                        </div>
+                        <div>
+                            <CardTitle className="text-base font-medium text-foreground">Browser Notifications</CardTitle>
+                            <CardDescription className="text-xs">Desktop popups when the dashboard is open in another tab.</CardDescription>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent className="space-y-6 pt-0">
+                    {/* Permission Status */}
+                    <div className={cn(
+                        "rounded-lg border p-3 flex items-center gap-3 text-xs transition-colors",
+                        permissionStatus === 'granted'
+                            ? "bg-slate-50/50 border-slate-100 text-muted-foreground"
+                            : "bg-amber-50/50 border-amber-100/50 text-amber-800"
+                    )}>
+                        {permissionStatus === 'granted' ? <CheckCircle className="h-4 w-4 text-emerald-500" /> : <AlertTriangle className="h-4 w-4 text-amber-500" />}
+                        <div className="flex-1 font-medium">
+                            {permissionStatus === 'granted' ? "Browser permissions granted" : "Browser permissions required"}
+                        </div>
+                        {permissionStatus !== 'granted' && (
+                            <Button size="sm" variant="outline" className="h-7 text-xs bg-white" onClick={handleRequestPermission}>Enable</Button>
                         )}
-                        onClick={() => permissionStatus === 'granted' && toggleSetting(option.key)}
-                    >
-                        <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", option.bgColor)}>
-                            <option.icon className={cn("h-5 w-5", option.iconColor)} />
-                        </div>
-
-                        <div className="flex-1">
-                            <div className="font-medium text-sm">{option.title}</div>
-                            <div className="text-xs text-muted-foreground">{option.description}</div>
-                        </div>
-
-                        {/* Toggle Switch */}
-                        <button
-                            disabled={permissionStatus !== 'granted'}
-                            onClick={(e) => {
-                                e.stopPropagation()
-                                if (permissionStatus === 'granted') toggleSetting(option.key)
-                            }}
-                            className={cn(
-                                "relative w-11 h-6 rounded-full transition-colors duration-200",
-                                settings[option.key] && permissionStatus === 'granted' ? "bg-emerald-500" : "bg-muted",
-                                permissionStatus !== 'granted' && "opacity-50"
-                            )}
-                        >
-                            <div className={cn(
-                                "absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform duration-200",
-                                settings[option.key] && "translate-x-5"
-                            )} />
-                        </button>
                     </div>
-                ))}
-            </div>
 
-            {/* Save Button */}
-            <Button
-                onClick={handleSave}
-                disabled={saving || permissionStatus !== 'granted'}
-                className="w-full mt-6 rounded-xl"
-            >
-                <Save className="h-4 w-4 mr-2" />
-                {saving ? "Saving..." : "Save Preferences"}
-            </Button>
+                    <div className="space-y-5 divide-y divide-border/40">
+                        <div className="flex items-center justify-between pt-5 first:pt-0">
+                            <div className="space-y-0.5">
+                                <Label className="text-sm font-medium">Escalation Popups</Label>
+                                <p className="text-[11px] text-muted-foreground">When a user is angry or requests a human.</p>
+                            </div>
+                            <Switch
+                                checked={settings.escalation_alerts}
+                                onCheckedChange={() => toggleSetting('escalation_alerts')}
+                                disabled={permissionStatus !== 'granted'}
+                                className="data-[state=checked]:bg-foreground"
+                            />
+                        </div>
+                        <div className="flex items-center justify-between pt-5">
+                            <div className="space-y-0.5">
+                                <Label className="text-sm font-medium">New Message Sound</Label>
+                                <p className="text-[11px] text-muted-foreground">Play a subtle sound for every new message.</p>
+                            </div>
+                            <Switch
+                                checked={settings.new_message_alerts}
+                                onCheckedChange={() => toggleSetting('new_message_alerts')}
+                                disabled={permissionStatus !== 'granted'}
+                                className="data-[state=checked]:bg-foreground"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="flex justify-end pt-4 border-t mt-4">
+                        <Button onClick={handleSave} disabled={saving} className="bg-foreground text-background hover:bg-foreground/90 h-9 text-xs">
+                            {saving ? (
+                                <>
+                                    <div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-background border-t-transparent" />
+                                    Saving...
+                                </>
+                            ) : (
+                                <>
+                                    <Save className="h-3.5 w-3.5 mr-2" />
+                                    Save All Preferences
+                                </>
+                            )}
+                        </Button>
+                    </div>
+                </CardContent>
+            </Card>
         </div>
     )
 }

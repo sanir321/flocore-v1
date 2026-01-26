@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
-import { Save, Copy, Check } from 'lucide-react'
+import { Save, Copy, Check, User, Building2 } from 'lucide-react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface UserProfile {
     email: string
@@ -47,7 +48,7 @@ export default function ProfileSettingsPage() {
                 .single()
 
             if (workspaceData) {
-                setWorkspace(workspaceData as Workspace)
+                setWorkspace(workspaceData as unknown as Workspace)
             }
 
             setLoading(false)
@@ -72,7 +73,7 @@ export default function ProfileSettingsPage() {
 
             if (error) throw error
 
-            toast({ title: "Success", description: "Profile saved successfully." })
+            toast({ title: "Success", description: "Profile details updated successfully." })
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" })
         } finally {
@@ -89,104 +90,108 @@ export default function ProfileSettingsPage() {
 
     if (loading) {
         return (
-            <div className="flex h-full items-center justify-center">
+            <div className="flex h-64 items-center justify-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
         )
     }
 
     return (
-        <div className="p-6 max-w-2xl">
-            <div className="mb-6">
-                <h1 className="text-xl font-semibold">Profile</h1>
-                <p className="text-sm text-muted-foreground mt-1">Manage your account and workspace details</p>
+        <div className="space-y-10 max-w-4xl">
+            <div>
+                <h1 className="text-3xl font-semibold tracking-tight text-foreground">Profile & Workspace</h1>
+                <p className="text-muted-foreground text-base mt-2">Manage your account credentials and workspace preferences.</p>
             </div>
 
             {/* User Account Section */}
-            <div className="rounded-xl border bg-card p-6 mb-6">
-                <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">Account</h2>
-
-                <div className="space-y-4">
-                    <div className="space-y-2">
-                        <Label className="text-xs uppercase tracking-wider text-muted-foreground">Email</Label>
+            <Card className="rounded-xl border shadow-none hover:border-foreground/20 transition-all duration-300">
+                <CardHeader className="pb-5">
+                    <div className="flex items-center gap-5">
+                        <div className="w-14 h-14 rounded-full border bg-slate-50 flex items-center justify-center text-muted-foreground">
+                            <User className="h-6 w-6" />
+                        </div>
+                        <div>
+                            <CardTitle className="text-lg font-medium">Account Details</CardTitle>
+                            <CardDescription className="text-sm mt-1">Your personal account information.</CardDescription>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent className="space-y-6 pt-0">
+                    <div className="grid gap-2">
+                        <Label htmlFor="email" className="text-xs uppercase tracking-wider text-muted-foreground">Email Address</Label>
                         <Input
+                            id="email"
                             value={user?.email || ''}
                             disabled
-                            className="rounded-xl bg-muted"
+                            className="bg-slate-50 text-muted-foreground border-slate-200"
                         />
-                        <p className="text-xs text-muted-foreground">Email cannot be changed</p>
                     </div>
 
-                    <div className="space-y-2">
-                        <Label className="text-xs uppercase tracking-wider text-muted-foreground">User ID</Label>
+                    <div className="grid gap-2">
+                        <Label htmlFor="userId" className="text-xs uppercase tracking-wider text-muted-foreground">User ID</Label>
                         <div className="flex gap-2">
                             <Input
+                                id="userId"
                                 value={user?.id || ''}
                                 disabled
-                                className="rounded-xl bg-muted font-mono text-xs"
+                                className="bg-slate-50 font-mono text-xs text-muted-foreground border-slate-200"
                             />
                             <Button
                                 variant="outline"
                                 size="icon"
                                 onClick={() => copyToClipboard(user?.id || '', 'User ID')}
-                                className="flex-none"
+                                className="flex-none shrink-0 border-slate-200 hover:bg-slate-50"
                             >
-                                {copiedId === 'User ID' ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                                {copiedId === 'User ID' ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4 text-muted-foreground" />}
                             </Button>
                         </div>
                     </div>
-                </div>
-            </div>
+                </CardContent>
+            </Card>
 
             {/* Workspace Section */}
             {workspace && (
-                <div className="rounded-xl border bg-card p-6 mb-6">
-                    <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">Workspace</h2>
-
-                    <div className="space-y-4">
-                        <div className="space-y-2">
-                            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Workspace ID</Label>
-                            <div className="flex gap-2">
+                <Card className="rounded-xl border shadow-none hover:border-foreground/20 transition-all duration-300">
+                    <CardHeader className="pb-4">
+                        <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 rounded-full border bg-slate-50 flex items-center justify-center text-muted-foreground">
+                                <Building2 className="h-5 w-5" />
+                            </div>
+                            <div>
+                                <CardTitle className="text-base font-medium">Workspace Settings</CardTitle>
+                                <CardDescription className="text-xs">Configuration for your primary workspace.</CardDescription>
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="space-y-6 pt-0">
+                        <div className="grid md:grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                                <Label htmlFor="wsName">Workspace Name</Label>
                                 <Input
-                                    value={workspace.id}
-                                    disabled
-                                    className="rounded-xl bg-muted font-mono text-xs"
+                                    id="wsName"
+                                    value={workspace.name || ''}
+                                    onChange={(e) => setWorkspace(prev => prev ? { ...prev, name: e.target.value } : null)}
+                                    placeholder="e.g. Acme Corp"
+                                    className="bg-white"
                                 />
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => copyToClipboard(workspace.id, 'Workspace ID')}
-                                    className="flex-none"
-                                >
-                                    {copiedId === 'Workspace ID' ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
-                                </Button>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="industry">Industry</Label>
+                                <Input
+                                    id="industry"
+                                    value={workspace.industry || ''}
+                                    onChange={(e) => setWorkspace(prev => prev ? { ...prev, industry: e.target.value } : null)}
+                                    placeholder="e.g. Retail, Healthcare"
+                                    className="bg-white"
+                                />
                             </div>
                         </div>
 
                         <div className="space-y-2">
-                            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Workspace Name</Label>
-                            <Input
-                                value={workspace.name || ''}
-                                onChange={(e) => setWorkspace(prev => prev ? { ...prev, name: e.target.value } : null)}
-                                className="rounded-xl"
-                                placeholder="My Workspace"
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Industry</Label>
-                            <Input
-                                value={workspace.industry || ''}
-                                onChange={(e) => setWorkspace(prev => prev ? { ...prev, industry: e.target.value } : null)}
-                                className="rounded-xl"
-                                placeholder="Salon, Clinic, Retail, etc."
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Timezone</Label>
+                            <Label htmlFor="timezone">Timezone</Label>
                             <select
-                                className="flex h-10 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
+                                id="timezone"
+                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                 value={workspace.timezone || 'Asia/Kolkata'}
                                 onChange={(e) => setWorkspace(prev => prev ? { ...prev, timezone: e.target.value } : null)}
                             >
@@ -198,29 +203,47 @@ export default function ProfileSettingsPage() {
                                 <option value="Asia/Dubai">Asia/Dubai (GST)</option>
                                 <option value="Asia/Singapore">Asia/Singapore (SGT)</option>
                             </select>
+                            <p className="text-[10px] text-muted-foreground">Used for scheduling and analytics.</p>
                         </div>
 
-                        <div className="space-y-2">
-                            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Created</Label>
-                            <Input
-                                value={new Date(workspace.created_at).toLocaleDateString('en-US', {
-                                    year: 'numeric',
-                                    month: 'long',
-                                    day: 'numeric'
-                                })}
-                                disabled
-                                className="rounded-xl bg-muted"
-                            />
+                        <div className="grid gap-2">
+                            <Label htmlFor="wsId" className="text-xs uppercase tracking-wider text-muted-foreground">Workspace ID</Label>
+                            <div className="flex gap-2">
+                                <Input
+                                    id="wsId"
+                                    value={workspace.id}
+                                    disabled
+                                    className="bg-slate-50 font-mono text-xs text-muted-foreground border-slate-200"
+                                />
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => copyToClipboard(workspace.id, 'Workspace ID')}
+                                    className="flex-none shrink-0 border-slate-200 hover:bg-slate-50"
+                                >
+                                    {copiedId === 'Workspace ID' ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4 text-muted-foreground" />}
+                                </Button>
+                            </div>
                         </div>
-                    </div>
-                </div>
+
+                        <div className="pt-4 flex justify-end border-t mt-4">
+                            <Button onClick={handleSave} disabled={saving} className="min-w-[120px] bg-foreground text-background hover:bg-foreground/90 h-9 text-xs">
+                                {saving ? (
+                                    <>
+                                        <div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-background border-t-transparent" />
+                                        Saving...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Save className="h-3.5 w-3.5 mr-2" />
+                                        Save Changes
+                                    </>
+                                )}
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
             )}
-
-            {/* Save Button */}
-            <Button onClick={handleSave} disabled={saving} className="w-full rounded-xl">
-                <Save className="h-4 w-4 mr-2" />
-                {saving ? "Saving..." : "Save Changes"}
-            </Button>
         </div>
     )
 }

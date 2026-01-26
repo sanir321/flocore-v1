@@ -7,6 +7,9 @@ export type Json =
     | Json[]
 
 export type Database = {
+    // Allows to automatically instantiate createClient with right options
+    // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+
     public: {
         Tables: {
             agent_wiki: {
@@ -47,35 +50,47 @@ export type Database = {
             agents: {
                 Row: {
                     active: boolean | null
+                    business_hours: Json | null
+                    config: Json | null
                     created_at: string | null
                     id: string
                     model: string | null
                     name: string
+                    services: Json | null
                     system_prompt: string
                     type: string
                     updated_at: string | null
+                    use_cases: string[] | null
                     workspace_id: string
                 }
                 Insert: {
                     active?: boolean | null
+                    business_hours?: Json | null
+                    config?: Json | null
                     created_at?: string | null
                     id?: string
                     model?: string | null
                     name: string
+                    services?: Json | null
                     system_prompt: string
                     type: string
                     updated_at?: string | null
+                    use_cases?: string[] | null
                     workspace_id: string
                 }
                 Update: {
                     active?: boolean | null
+                    business_hours?: Json | null
+                    config?: Json | null
                     created_at?: string | null
                     id?: string
                     model?: string | null
                     name?: string
+                    services?: Json | null
                     system_prompt?: string
                     type?: string
                     updated_at?: string | null
+                    use_cases?: string[] | null
                     workspace_id?: string
                 }
                 Relationships: [
@@ -90,55 +105,36 @@ export type Database = {
             }
             ai_interactions: {
                 Row: {
-                    agent_id: string | null
-                    completion_tokens: number | null
                     conversation_id: string | null
                     created_at: string | null
-                    escalated: boolean | null
                     id: string
-                    latency_ms: number | null
+                    input_tokens: number | null
                     model: string | null
-                    prompt_tokens: number | null
-                    tool_calls: Json | null
-                    total_tokens: number | null
+                    output_tokens: number | null
+                    tool_calls: string[] | null
                     workspace_id: string
                 }
                 Insert: {
-                    agent_id?: string | null
-                    completion_tokens?: number | null
                     conversation_id?: string | null
                     created_at?: string | null
-                    escalated?: boolean | null
                     id?: string
-                    latency_ms?: number | null
+                    input_tokens?: number | null
                     model?: string | null
-                    prompt_tokens?: number | null
-                    tool_calls?: Json | null
-                    total_tokens?: number | null
+                    output_tokens?: number | null
+                    tool_calls?: string[] | null
                     workspace_id: string
                 }
                 Update: {
-                    agent_id?: string | null
-                    completion_tokens?: number | null
                     conversation_id?: string | null
                     created_at?: string | null
-                    escalated?: boolean | null
                     id?: string
-                    latency_ms?: number | null
+                    input_tokens?: number | null
                     model?: string | null
-                    prompt_tokens?: number | null
-                    tool_calls?: Json | null
-                    total_tokens?: number | null
+                    output_tokens?: number | null
+                    tool_calls?: string[] | null
                     workspace_id?: string
                 }
                 Relationships: [
-                    {
-                        foreignKeyName: "ai_interactions_agent_id_fkey"
-                        columns: ["agent_id"]
-                        isOneToOne: false
-                        referencedRelation: "agents"
-                        referencedColumns: ["id"]
-                    },
                     {
                         foreignKeyName: "ai_interactions_conversation_id_fkey"
                         columns: ["conversation_id"]
@@ -157,9 +153,8 @@ export type Database = {
             }
             appointments: {
                 Row: {
-                    booked_by: string
-                    contact_id: string
-                    conversation_id: string | null
+                    booked_by: string | null
+                    contact_id: string | null
                     created_at: string | null
                     end_time: string
                     google_event_id: string | null
@@ -168,14 +163,13 @@ export type Database = {
                     notes: string | null
                     start_time: string
                     status: string | null
-                    title: string | null
+                    title: string
                     updated_at: string | null
                     workspace_id: string
                 }
                 Insert: {
-                    booked_by: string
-                    contact_id: string
-                    conversation_id?: string | null
+                    booked_by?: string | null
+                    contact_id?: string | null
                     created_at?: string | null
                     end_time: string
                     google_event_id?: string | null
@@ -184,14 +178,13 @@ export type Database = {
                     notes?: string | null
                     start_time: string
                     status?: string | null
-                    title?: string | null
+                    title: string
                     updated_at?: string | null
                     workspace_id: string
                 }
                 Update: {
-                    booked_by?: string
-                    contact_id?: string
-                    conversation_id?: string | null
+                    booked_by?: string | null
+                    contact_id?: string | null
                     created_at?: string | null
                     end_time?: string
                     google_event_id?: string | null
@@ -200,7 +193,7 @@ export type Database = {
                     notes?: string | null
                     start_time?: string
                     status?: string | null
-                    title?: string | null
+                    title?: string
                     updated_at?: string | null
                     workspace_id?: string
                 }
@@ -210,13 +203,6 @@ export type Database = {
                         columns: ["contact_id"]
                         isOneToOne: false
                         referencedRelation: "contacts"
-                        referencedColumns: ["id"]
-                    },
-                    {
-                        foreignKeyName: "appointments_conversation_id_fkey"
-                        columns: ["conversation_id"]
-                        isOneToOne: false
-                        referencedRelation: "conversations"
                         referencedColumns: ["id"]
                     },
                     {
@@ -231,36 +217,33 @@ export type Database = {
             audit_logs: {
                 Row: {
                     action: string
+                    actor_id: string | null
                     created_at: string | null
+                    details: Json | null
+                    entity_id: string | null
+                    entity_type: string
                     id: string
-                    ip_address: unknown | null
-                    metadata: Json | null
-                    resource_id: string | null
-                    resource_type: string | null
-                    user_id: string | null
-                    workspace_id: string | null
+                    workspace_id: string
                 }
                 Insert: {
                     action: string
+                    actor_id?: string | null
                     created_at?: string | null
+                    details?: Json | null
+                    entity_id?: string | null
+                    entity_type: string
                     id?: string
-                    ip_address?: unknown | null
-                    metadata?: Json | null
-                    resource_id?: string | null
-                    resource_type?: string | null
-                    user_id?: string | null
-                    workspace_id?: string | null
+                    workspace_id: string
                 }
                 Update: {
                     action?: string
+                    actor_id?: string | null
                     created_at?: string | null
+                    details?: Json | null
+                    entity_id?: string | null
+                    entity_type?: string
                     id?: string
-                    ip_address?: unknown | null
-                    metadata?: Json | null
-                    resource_id?: string | null
-                    resource_type?: string | null
-                    user_id?: string | null
-                    workspace_id?: string | null
+                    workspace_id?: string
                 }
                 Relationships: [
                     {
@@ -275,43 +258,34 @@ export type Database = {
             calendar_connections: {
                 Row: {
                     access_token: string | null
-                    calendar_email: string | null
                     calendar_id: string | null
-                    connected: boolean | null
                     created_at: string | null
-                    last_sync_at: string | null
-                    provider: string | null
+                    expires_at: number | null
+                    id: string
+                    provider: string
                     refresh_token: string | null
-                    sync_errors: string | null
-                    token_expires_at: string | null
                     updated_at: string | null
                     workspace_id: string
                 }
                 Insert: {
                     access_token?: string | null
-                    calendar_email?: string | null
                     calendar_id?: string | null
-                    connected?: boolean | null
                     created_at?: string | null
-                    last_sync_at?: string | null
-                    provider?: string | null
+                    expires_at?: number | null
+                    id?: string
+                    provider: string
                     refresh_token?: string | null
-                    sync_errors?: string | null
-                    token_expires_at?: string | null
                     updated_at?: string | null
                     workspace_id: string
                 }
                 Update: {
                     access_token?: string | null
-                    calendar_email?: string | null
                     calendar_id?: string | null
-                    connected?: boolean | null
                     created_at?: string | null
-                    last_sync_at?: string | null
-                    provider?: string | null
+                    expires_at?: number | null
+                    id?: string
+                    provider?: string
                     refresh_token?: string | null
-                    sync_errors?: string | null
-                    token_expires_at?: string | null
                     updated_at?: string | null
                     workspace_id?: string
                 }
@@ -319,7 +293,7 @@ export type Database = {
                     {
                         foreignKeyName: "calendar_connections_workspace_id_fkey"
                         columns: ["workspace_id"]
-                        isOneToOne: true
+                        isOneToOne: false
                         referencedRelation: "workspaces"
                         referencedColumns: ["id"]
                     },
@@ -374,10 +348,8 @@ export type Database = {
             }
             conversations: {
                 Row: {
-                    assigned_at: string | null
                     assigned_to_human: boolean | null
-                    assigned_to_user_id: string | null
-                    channel: string
+                    channel: string | null
                     contact_id: string
                     created_at: string | null
                     escalated: boolean | null
@@ -385,15 +357,15 @@ export type Database = {
                     escalation_reason: string | null
                     id: string
                     last_message_at: string | null
+                    last_read_at: string | null
                     status: string | null
+                    unread_count: number | null
                     updated_at: string | null
                     workspace_id: string
                 }
                 Insert: {
-                    assigned_at?: string | null
                     assigned_to_human?: boolean | null
-                    assigned_to_user_id?: string | null
-                    channel: string
+                    channel?: string | null
                     contact_id: string
                     created_at?: string | null
                     escalated?: boolean | null
@@ -401,15 +373,15 @@ export type Database = {
                     escalation_reason?: string | null
                     id?: string
                     last_message_at?: string | null
+                    last_read_at?: string | null
                     status?: string | null
+                    unread_count?: number | null
                     updated_at?: string | null
                     workspace_id: string
                 }
                 Update: {
-                    assigned_at?: string | null
                     assigned_to_human?: boolean | null
-                    assigned_to_user_id?: string | null
-                    channel?: string
+                    channel?: string | null
                     contact_id?: string
                     created_at?: string | null
                     escalated?: boolean | null
@@ -417,7 +389,9 @@ export type Database = {
                     escalation_reason?: string | null
                     id?: string
                     last_message_at?: string | null
+                    last_read_at?: string | null
                     status?: string | null
+                    unread_count?: number | null
                     updated_at?: string | null
                     workspace_id?: string
                 }
@@ -473,15 +447,47 @@ export type Database = {
                     },
                 ]
             }
+            knowledge_base: {
+                Row: {
+                    content: string
+                    created_at: string | null
+                    id: string
+                    title: string
+                    workspace_id: string
+                }
+                Insert: {
+                    content: string
+                    created_at?: string | null
+                    id?: string
+                    title: string
+                    workspace_id: string
+                }
+                Update: {
+                    content?: string
+                    created_at?: string | null
+                    id?: string
+                    title?: string
+                    workspace_id?: string
+                }
+                Relationships: [
+                    {
+                        foreignKeyName: "knowledge_base_workspace_id_fkey"
+                        columns: ["workspace_id"]
+                        isOneToOne: false
+                        referencedRelation: "workspaces"
+                        referencedColumns: ["id"]
+                    },
+                ]
+            }
             messages: {
                 Row: {
                     content: string
                     conversation_id: string
                     created_at: string | null
                     id: string
-                    media_type: string | null
-                    media_url: string | null
                     metadata: Json | null
+                    provider_message_id: string | null
+                    read_at: string | null
                     sender: string
                 }
                 Insert: {
@@ -489,9 +495,9 @@ export type Database = {
                     conversation_id: string
                     created_at?: string | null
                     id?: string
-                    media_type?: string | null
-                    media_url?: string | null
                     metadata?: Json | null
+                    provider_message_id?: string | null
+                    read_at?: string | null
                     sender: string
                 }
                 Update: {
@@ -499,9 +505,9 @@ export type Database = {
                     conversation_id?: string
                     created_at?: string | null
                     id?: string
-                    media_type?: string | null
-                    media_url?: string | null
                     metadata?: Json | null
+                    provider_message_id?: string | null
+                    read_at?: string | null
                     sender?: string
                 }
                 Relationships: [
@@ -514,119 +520,78 @@ export type Database = {
                     },
                 ]
             }
+            notification_settings: {
+                Row: {
+                    admin_phone: string | null
+                    created_at: string | null
+                    escalation_alerts: boolean | null
+                    updated_at: string | null
+                    workspace_id: string
+                }
+                Insert: {
+                    admin_phone?: string | null
+                    created_at?: string | null
+                    escalation_alerts?: boolean | null
+                    updated_at?: string | null
+                    workspace_id: string
+                }
+                Update: {
+                    admin_phone?: string | null
+                    created_at?: string | null
+                    escalation_alerts?: boolean | null
+                    updated_at?: string | null
+                    workspace_id?: string
+                }
+                Relationships: [
+                    {
+                        foreignKeyName: "notification_settings_workspace_id_fkey"
+                        columns: ["workspace_id"]
+                        isOneToOne: true
+                        referencedRelation: "workspaces"
+                        referencedColumns: ["id"]
+                    },
+                ]
+            }
             whatsapp_connections: {
                 Row: {
                     connected: boolean | null
                     created_at: string | null
-                    last_message_at: string | null
-                    metadata: Json | null
+                    id: string
                     mode: string | null
                     twilio_account_sid: string | null
                     twilio_auth_token: string | null
                     twilio_phone_number: string | null
                     updated_at: string | null
-                    verified_at: string | null
                     webhook_url: string | null
                     workspace_id: string
                 }
                 Insert: {
                     connected?: boolean | null
                     created_at?: string | null
-                    last_message_at?: string | null
-                    metadata?: Json | null
+                    id?: string
                     mode?: string | null
                     twilio_account_sid?: string | null
                     twilio_auth_token?: string | null
                     twilio_phone_number?: string | null
                     updated_at?: string | null
-                    verified_at?: string | null
                     webhook_url?: string | null
                     workspace_id: string
                 }
                 Update: {
                     connected?: boolean | null
                     created_at?: string | null
-                    last_message_at?: string | null
-                    metadata?: Json | null
+                    id?: string
                     mode?: string | null
                     twilio_account_sid?: string | null
                     twilio_auth_token?: string | null
                     twilio_phone_number?: string | null
                     updated_at?: string | null
-                    verified_at?: string | null
                     webhook_url?: string | null
                     workspace_id?: string
                 }
                 Relationships: [
                     {
                         foreignKeyName: "whatsapp_connections_workspace_id_fkey"
-                        columns: ["workspace_id"]
-                        isOneToOne: true
-                        referencedRelation: "workspaces"
-                        referencedColumns: ["id"]
-                    },
-                ]
-            }
-            workspace_flags: {
-                Row: {
-                    calendar_connected: boolean | null
-                    instructions_seen: boolean | null
-                    onboarding_completed: boolean | null
-                    updated_at: string | null
-                    whatsapp_connected: boolean | null
-                    workspace_id: string
-                }
-                Insert: {
-                    calendar_connected?: boolean | null
-                    instructions_seen?: boolean | null
-                    onboarding_completed?: boolean | null
-                    updated_at?: string | null
-                    whatsapp_connected?: boolean | null
-                    workspace_id: string
-                }
-                Update: {
-                    calendar_connected?: boolean | null
-                    instructions_seen?: boolean | null
-                    onboarding_completed?: boolean | null
-                    updated_at?: string | null
-                    whatsapp_connected?: boolean | null
-                    workspace_id?: string
-                }
-                Relationships: [
-                    {
-                        foreignKeyName: "workspace_flags_workspace_id_fkey"
-                        columns: ["workspace_id"]
-                        isOneToOne: true
-                        referencedRelation: "workspaces"
-                        referencedColumns: ["id"]
-                    },
-                ]
-            }
-            workspace_members: {
-                Row: {
-                    created_at: string | null
-                    id: string
-                    role: string | null
-                    user_id: string
-                    workspace_id: string
-                }
-                Insert: {
-                    created_at?: string | null
-                    id?: string
-                    role?: string | null
-                    user_id: string
-                    workspace_id: string
-                }
-                Update: {
-                    created_at?: string | null
-                    id?: string
-                    role?: string | null
-                    user_id?: string
-                    workspace_id?: string
-                }
-                Relationships: [
-                    {
-                        foreignKeyName: "workspace_members_workspace_id_fkey"
                         columns: ["workspace_id"]
                         isOneToOne: false
                         referencedRelation: "workspaces"
@@ -667,28 +632,28 @@ export type Database = {
                 Row: {
                     created_at: string | null
                     id: string
-                    industry: string | null
                     name: string
                     owner_id: string
-                    timezone: string | null
+                    settings: Json | null
+                    slug: string
                     updated_at: string | null
                 }
                 Insert: {
                     created_at?: string | null
                     id?: string
-                    industry?: string | null
                     name: string
                     owner_id: string
-                    timezone?: string | null
+                    settings?: Json | null
+                    slug: string
                     updated_at?: string | null
                 }
                 Update: {
                     created_at?: string | null
                     id?: string
-                    industry?: string | null
                     name?: string
                     owner_id?: string
-                    timezone?: string | null
+                    settings?: Json | null
+                    slug?: string
                     updated_at?: string | null
                 }
                 Relationships: []
@@ -698,38 +663,12 @@ export type Database = {
             [_ in never]: never
         }
         Functions: {
-            get_dashboard_metrics: {
-                Args: {
-                    p_workspace_id: string
-                }
-                Returns: Json
-            }
-            initialize_workspace: {
-                Args: {
-                    p_workspace_id: string
-                    p_support_enabled: boolean
-                    p_appointments_enabled: boolean
-                }
-                Returns: Json
-            }
-            mark_conversation_read: {
-                Args: {
-                    conversation_id: string
-                }
-                Returns: void
-            }
             should_escalate_message: {
                 Args: {
                     p_workspace_id: string
                     p_message_content: string
                 }
                 Returns: Json
-            }
-            user_has_workspace_access: {
-                Args: {
-                    p_workspace_id: string
-                }
-                Returns: boolean
             }
         }
         Enums: {
@@ -740,3 +679,100 @@ export type Database = {
         }
     }
 }
+
+type PublicSchema = Database[Extract<keyof Database, "public">]
+
+export type Tables<
+    PublicTableNameOrOptions extends
+    | keyof (PublicSchema["Tables"] & PublicSchema["Views"])
+    | { schema: keyof Database },
+    TableName extends PublicTableNameOrOptions extends { schema: keyof Database }
+    ? keyof (Database[PublicTableNameOrOptions["schema"]]["Tables"] &
+        Database[PublicTableNameOrOptions["schema"]]["Views"])
+    : never = never,
+> = PublicTableNameOrOptions extends { schema: keyof Database }
+    ? (Database[PublicTableNameOrOptions["schema"]]["Tables"] &
+        Database[PublicTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+            Row: infer R
+        }
+    ? R
+    : never
+    : PublicTableNameOrOptions extends keyof (PublicSchema["Tables"] &
+        PublicSchema["Views"])
+    ? (PublicSchema["Tables"] &
+        PublicSchema["Views"])[PublicTableNameOrOptions] extends {
+            Row: infer R
+        }
+    ? R
+    : never
+    : never
+
+export type TablesInsert<
+    PublicTableNameOrOptions extends
+    | keyof PublicSchema["Tables"]
+    | { schema: keyof Database },
+    TableName extends PublicTableNameOrOptions extends { schema: keyof Database }
+    ? keyof Database[PublicTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = PublicTableNameOrOptions extends { schema: keyof Database }
+    ? Database[PublicTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+        Insert: infer I
+    }
+    ? I
+    : never
+    : PublicTableNameOrOptions extends keyof PublicSchema["Tables"]
+    ? PublicSchema["Tables"][PublicTableNameOrOptions] extends {
+        Insert: infer I
+    }
+    ? I
+    : never
+    : never
+
+export type TablesUpdate<
+    PublicTableNameOrOptions extends
+    | keyof PublicSchema["Tables"]
+    | { schema: keyof Database },
+    TableName extends PublicTableNameOrOptions extends { schema: keyof Database }
+    ? keyof Database[PublicTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = PublicTableNameOrOptions extends { schema: keyof Database }
+    ? Database[PublicTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+        Update: infer U
+    }
+    ? U
+    : never
+    : PublicTableNameOrOptions extends keyof PublicSchema["Tables"]
+    ? PublicSchema["Tables"][PublicTableNameOrOptions] extends {
+        Update: infer U
+    }
+    ? U
+    : never
+    : never
+
+export type Enums<
+    PublicEnumNameOrOptions extends
+    | keyof PublicSchema["Enums"]
+    | { schema: keyof Database },
+    EnumName extends PublicEnumNameOrOptions extends { schema: keyof Database }
+    ? keyof Database[PublicEnumNameOrOptions["schema"]]["Enums"]
+    : never = never,
+> = PublicEnumNameOrOptions extends { schema: keyof Database }
+    ? Database[PublicEnumNameOrOptions["schema"]]["Enums"][EnumName]
+    : PublicEnumNameOrOptions extends keyof PublicSchema["Enums"]
+    ? PublicSchema["Enums"][PublicEnumNameOrOptions]
+    : never
+
+export type CompositeTypes<
+    PublicCompositeTypeNameOrOptions extends
+    | keyof PublicSchema["CompositeTypes"]
+    | { schema: keyof Database },
+    CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+        schema: keyof Database
+    }
+    ? keyof Database[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never = never,
+> = PublicCompositeTypeNameOrOptions extends { schema: keyof Database }
+    ? Database[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+    : PublicCompositeTypeNameOrOptions extends keyof PublicSchema["CompositeTypes"]
+    ? PublicSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never

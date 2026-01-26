@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
-import { format } from 'date-fns'
+
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
@@ -10,8 +10,7 @@ import {
     MoreHorizontal,
     Mail,
     Phone,
-    MessageSquare,
-    Tag
+    MessageSquare
 } from 'lucide-react'
 import FlowCoreLoader from '@/components/ui/FlowCoreLoader'
 
@@ -76,115 +75,141 @@ export default function ContactsPage() {
     }
 
     return (
-        <div className="flex-1 h-screen flex flex-col bg-slate-50 overflow-hidden font-sans">
+        <div className="flex-1 h-full flex flex-col space-y-6">
             {/* Header */}
-            <div className="flex-none bg-white border-b px-8 py-5 flex items-center justify-between">
+            <div className="flex items-center justify-between px-2">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Contacts</h1>
-                    <p className="text-sm text-slate-500 mt-1">Manage all your customer relationships</p>
+                    <h1 className="text-2xl font-bold tracking-tight text-foreground">Contacts</h1>
+                    <p className="text-muted-foreground text-xs mt-1">Manage all your customer relationships.</p>
                 </div>
-                <Button className="bg-primary text-white gap-2 rounded-xl" disabled>
-                    <Plus className="h-4 w-4" />
-                    Add Contact
+                <Button size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm rounded-lg gap-2 text-xs h-8" disabled>
+                    <Plus className="h-3.5 w-3.5" />
+                    New Contact
                 </Button>
             </div>
 
             {/* Toolbar */}
-            <div className="px-8 py-4 flex items-center justify-between gap-4">
-                <div className="relative w-80">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <div className="flex items-center gap-4 bg-card/40 p-1 rounded-xl border border-border/40 backdrop-blur-sm max-w-sm ml-1">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                     <Input
-                        placeholder="Search contacts..."
-                        className="pl-9 h-10 bg-white border-slate-200 rounded-lg"
+                        placeholder="Search by name, phone or email..."
+                        className="pl-9 h-9 text-xs bg-transparent border-transparent focus:ring-0 placeholder:text-muted-foreground/50"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                     />
                 </div>
-                <div className="text-sm text-slate-500">
-                    Showing <span className="font-medium text-slate-900">{filteredContacts.length}</span> contacts
-                </div>
             </div>
 
-            {/* Table Area */}
-            <div className="flex-1 overflow-auto px-8 pb-8">
-                <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
-                    <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500 font-semibold tracking-wider">
-                            <tr>
-                                <th className="px-6 py-4">Name</th>
-                                <th className="px-6 py-4">Contact Info</th>
-                                <th className="px-6 py-4">Tags</th>
-                                <th className="px-6 py-4">Created</th>
-                                <th className="px-6 py-4 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {filteredContacts.length === 0 ? (
-                                <tr>
-                                    <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
-                                        No contacts found matching your search.
-                                    </td>
-                                </tr>
-                            ) : (
-                                filteredContacts.map(contact => (
-                                    <tr key={contact.id} className="hover:bg-slate-50/50 transition-colors group">
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="h-9 w-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-xs uppercase">
-                                                    {(contact.name?.[0] || contact.phone?.[0] || '?')}
-                                                </div>
-                                                <div>
-                                                    <p className="font-medium text-slate-900">{contact.name || 'Unknown'}</p>
-                                                    <div className="flex items-center gap-1.5 mt-0.5">
-                                                        <span className={Object.is(contact.channel, 'whatsapp') ? "text-emerald-600" : "text-slate-400"}>
-                                                            {contact.channel === 'whatsapp' ? <MessageSquare className="h-3 w-3" /> : <User className="h-3 w-3" />}
-                                                        </span>
-                                                        <span className="text-xs text-slate-500 capitalize">{contact.channel || 'Manual'}</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex flex-col gap-1">
-                                                <div className="flex items-center gap-2 text-slate-600">
-                                                    <Phone className="h-3 w-3 text-slate-400" />
-                                                    <span>{contact.phone}</span>
-                                                </div>
-                                                {contact.email && (
-                                                    <div className="flex items-center gap-2 text-slate-600">
-                                                        <Mail className="h-3 w-3 text-slate-400" />
-                                                        <span>{contact.email}</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            {contact.tags && contact.tags.length > 0 ? (
-                                                <div className="flex flex-wrap gap-1">
-                                                    {contact.tags.map(tag => (
-                                                        <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium border border-slate-200">
-                                                            <Tag className="h-2.5 w-2.5 opacity-50" />
-                                                            {tag}
-                                                        </span>
-                                                    ))}
-                                                </div>
+            {/* Content Card */}
+            <div className="bg-card rounded-2xl border border-border/50 shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
+
+                {/* Table Header */}
+                <div className="grid grid-cols-12 gap-3 px-4 py-2 border-b border-border/50 bg-muted/20 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <div className="col-span-4">Name & Channel</div>
+                    <div className="col-span-4">Contact Details</div>
+                    <div className="col-span-3">Tags</div>
+                    <div className="col-span-1 text-right">Action</div>
+                </div>
+
+                {/* Table Body */}
+                <div className="overflow-y-auto flex-1 p-2 space-y-1">
+                    {contacts.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full py-20 text-center">
+                            <div className="w-20 h-20 bg-muted/30 rounded-full flex items-center justify-center mb-6">
+                                <User className="h-8 w-8 text-muted-foreground/50" />
+                            </div>
+                            <h3 className="text-lg font-medium text-foreground">No contacts yet</h3>
+                            <p className="text-sm text-muted-foreground max-w-xs mt-2">
+                                Add your first contact to start managing relationships.
+                            </p>
+                            <Button className="mt-6 rounded-xl bg-primary hover:bg-primary/90">
+                                <Plus className="h-4 w-4 mr-2" />
+                                Create Contact
+                            </Button>
+                        </div>
+                    ) : filteredContacts.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full py-20 text-center">
+                            <div className="w-20 h-20 bg-muted/30 rounded-full flex items-center justify-center mb-6">
+                                <Search className="h-8 w-8 text-muted-foreground/50" />
+                            </div>
+                            <h3 className="text-lg font-medium text-foreground">No contacts found</h3>
+                            <p className="text-sm text-muted-foreground max-w-xs mt-2">
+                                We couldn't find any contacts matching "{searchQuery}". Try a different search term.
+                            </p>
+                            <Button
+                                variant="outline"
+                                className="mt-6 rounded-xl border-dashed"
+                                onClick={() => setSearchQuery('')}
+                            >
+                                Clear Search
+                            </Button>
+                        </div>
+                    ) : (
+                        filteredContacts.map(contact => (
+                            <div
+                                key={contact.id}
+                                className="grid grid-cols-12 gap-3 px-4 py-2 items-center hover:bg-muted/30 transition-colors rounded-lg group border border-transparent hover:border-border/30"
+                            >
+                                {/* Name Column */}
+                                <div className="col-span-4 flex items-center gap-3">
+                                    <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-100 to-purple-100 text-indigo-600 flex items-center justify-center font-bold text-xs shadow-sm ring-1 ring-white">
+                                        {(contact.name?.[0] || contact.phone?.[0] || '?').toUpperCase()}
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="font-medium text-xs text-foreground truncate">{contact.name || 'Unknown'}</p>
+                                        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                                            {contact.channel === 'whatsapp' ? (
+                                                <MessageSquare className="h-2.5 w-2.5 text-emerald-500" />
                                             ) : (
-                                                <span className="text-slate-400 text-xs italic">No tags</span>
+                                                <User className="h-2.5 w-2.5" />
                                             )}
-                                        </td>
-                                        <td className="px-6 py-4 text-slate-500">
-                                            {contact.created_at ? format(new Date(contact.created_at), 'MMM d, yyyy') : '-'}
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600">
-                                                <MoreHorizontal className="h-4 w-4" />
-                                            </Button>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
+                                            <span className="capitalize">{contact.channel || 'Manual'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Details Column */}
+                                <div className="col-span-4 space-y-0.5">
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                        <Phone className="h-3 w-3 opacity-60" />
+                                        <span className="font-mono text-[10px]">{contact.phone}</span>
+                                    </div>
+                                    {contact.email && (
+                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                            <Mail className="h-3 w-3 opacity-60" />
+                                            <span className="truncate text-[10px]">{contact.email}</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Tags Column */}
+                                <div className="col-span-3">
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {contact.tags && contact.tags.length > 0 ? (
+                                            contact.tags.slice(0, 2).map(tag => (
+                                                <span key={tag} className="inline-flex items-center px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground text-xs font-medium border border-border/50 shadow-sm">
+                                                    {tag}
+                                                </span>
+                                            ))
+                                        ) : (
+                                            <span className="text-muted-foreground/40 text-xs italic">No tags</span>
+                                        )}
+                                        {contact.tags && contact.tags.length > 2 && (
+                                            <span className="text-xs text-muted-foreground px-1">+{contact.tags.length - 2}</span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Action Column */}
+                                <div className="col-span-1 flex justify-end">
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            </div>
+                        ))
+                    )}
                 </div>
             </div>
         </div>
