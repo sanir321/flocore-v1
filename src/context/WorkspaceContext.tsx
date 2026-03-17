@@ -4,7 +4,17 @@ import type { ReactNode } from 'react'
 interface Workspace {
     id: string
     owner_id: string
-    // Add other workspace fields here as needed
+    name: string
+    slug?: string | null
+    industry?: string | null
+    timezone?: string | null
+    escalation_enabled?: boolean | null
+    created_at?: string
+    updated_at?: string | null
+    user?: {
+        id: string
+        email?: string
+    }
 }
 
 interface WorkspaceContextType {

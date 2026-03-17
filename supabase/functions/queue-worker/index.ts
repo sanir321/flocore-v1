@@ -4,6 +4,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { sendReply } from '../_shared/reply-router.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -26,7 +27,7 @@ serve(async (req: Request) => {
 
         // Claim a batch of queue items
         const { data: queueItems, error: claimError } = await supabase.rpc('claim_queue_items', {
-            p_batch_size: 5
+            p_batch_size: 20
         })
 
         if (claimError) {
@@ -43,24 +44,54 @@ serve(async (req: Request) => {
 
         console.log(`[Queue Worker] Processing ${queueItems.length} items`)
 
-        let processed = 0
-        let failed = 0
-
+        // Group queue items by conversation_id
+        const conversationGroups: { [conversationId: string]: any[] } = {};
         for (const item of queueItems) {
-            try {
-                await processQueueItem(supabase, groqApiKey, item)
-                await supabase.rpc('complete_queue_item', { p_queue_id: item.id })
-                processed++
-                console.log(`[Queue Worker] Completed: ${item.message_id}`)
-            } catch (error: any) {
-                console.error(`[Queue Worker] Failed: ${item.message_id}`, error.message)
-                await supabase.rpc('fail_queue_item', {
-                    p_queue_id: item.id,
-                    p_error: error.message || String(error)
-                })
-                failed++
+            if (!conversationGroups[item.conversation_id]) {
+                conversationGroups[item.conversation_id] = [];
             }
+            conversationGroups[item.conversation_id].push(item);
         }
+
+        const uniqueConversations = Object.keys(conversationGroups);
+        console.log(`[Queue Worker] Grouped into ${uniqueConversations.length} unique conversations`);
+
+        // Process in parallel chunks of 5 (concurrency limiter)
+        const CHUNK_SIZE = 5;
+        const results = { processed: 0, failed: 0 };
+
+        for (let i = 0; i < uniqueConversations.length; i += CHUNK_SIZE) {
+            const chunk = uniqueConversations.slice(i, i + CHUNK_SIZE);
+            await Promise.all(chunk.map(async (conversationId: string) => {
+                const items = conversationGroups[conversationId];
+                // Take the first item to pass down context like workspace_id
+                const leadItem = items[0]; 
+
+                try {
+                    console.log(`[Queue Worker] Processing conversation ${conversationId} with ${items.length} queued messages`);
+                    await processQueueItem(supabase, groqApiKey, leadItem);
+                    
+                    // Mark all items for this conversation as completed
+                    for (const item of items) {
+                        await supabase.rpc('complete_queue_item', { p_queue_id: item.id });
+                    }
+                    results.processed += items.length;
+                    console.log(`[Queue Worker] Completed ${items.length} items for conversation ${conversationId}`);
+                } catch (error: any) {
+                    console.error(`[Queue Worker] Failed for conversation ${conversationId}:`, error.message);
+                    // Mark all items for this conversation as failed
+                    for (const item of items) {
+                        await supabase.rpc('fail_queue_item', {
+                            p_queue_id: item.id,
+                            p_error: error.message || String(error)
+                        });
+                    }
+                    results.failed += items.length;
+                }
+            }));
+        }
+
+        const { processed, failed } = results
 
         console.log(`[Queue Worker] Batch complete: ${processed} success, ${failed} failed`)
 
@@ -70,6 +101,26 @@ serve(async (req: Request) => {
 
     } catch (error: any) {
         console.error('[Queue Worker] Fatal error:', error)
+
+        // Log to audit_logs
+        try {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+            const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
+            await supabase.from('audit_logs').insert({
+                resource_type: 'queue_worker_error',
+                action: 'failure',
+                metadata: {
+                    error_message: error?.message || String(error),
+                    error_stack: error?.stack,
+                    timestamp: new Date().toISOString()
+                }
+            })
+        } catch (logError) {
+            console.error('Failed to log to audit_logs:', logError)
+        }
+
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -89,11 +140,17 @@ async function processQueueItem(
     // 1. Fetch conversation state (FRESH read to prevent race conditions)
     const { data: conversation, error: convError } = await supabase
         .from('conversations')
-        .select('assigned_to_human, escalated, status, contact_id')
+        .select('assigned_to_human, escalated, status, contact_id, channel, channel_metadata')
         .eq('id', conversation_id)
         .single()
 
     if (convError) throw convError
+
+    // Executive Assistant Mode: Skip auto-replies for Gmail
+    if (conversation.channel === 'gmail') {
+        console.log('[Queue Worker] Gmail message detected - skipping auto-reply (Executive Assistant Mode)');
+        return; // Mark as processed but do nothing
+    }
 
     // CRITICAL: Double-check assigned_to_human
     if (conversation.assigned_to_human) {
@@ -121,22 +178,10 @@ async function processQueueItem(
 
     if (!contact) throw new Error('Contact not found')
 
-    // 4. Check escalation rules
-    const { data: escalationCheck } = await supabase.rpc('should_escalate_message', {
-        p_workspace_id: workspace_id,
-        p_message_content: messageContent
-    })
-
-    if (escalationCheck?.should_escalate) {
-        console.log(`[Process] Escalating: ${escalationCheck.reason}`)
-        await handleEscalation(supabase, workspace_id, conversation_id, conversation.contact_id, contact, escalationCheck.reason)
-        return
-    }
-
     // 5. Fetch agent configuration
     const { data: agent } = await supabase
         .from('agents')
-        .select('*')
+        .select('id, system_prompt, type')
         .eq('workspace_id', workspace_id)
         .eq('active', true)
         .single()
@@ -144,6 +189,18 @@ async function processQueueItem(
     if (!agent) {
         console.error('[Process] No active agent found')
         throw new Error('No active agent configured')
+    }
+
+    // 4. Check escalation rules (RPC) - now run on every message if not assigned to human
+    const { data: escalationCheck } = await supabase.rpc('should_escalate_message', {
+        p_workspace_id: workspace_id,
+        p_message_content: messageContent
+    });
+
+    if (escalationCheck?.should_escalate) {
+        console.log(`[Process] Escalating: ${escalationCheck.reason}`);
+        await handleEscalation(supabase, workspace_id, conversation_id, conversation.contact_id, contact, escalationCheck.reason);
+        return;
     }
 
     // 6. Fetch conversation history
@@ -159,18 +216,85 @@ async function processQueueItem(
         content: msg.content
     })) || []
 
+    // 6a. Fetch Knowledge Base
+    const { data: wikiItems } = await supabase
+        .from('knowledge_base')
+        .select('title, content, category')
+        .eq('workspace_id', workspace_id)
+        .order('updated_at', { ascending: false })
+        .limit(5)
+
+    const knowledgeContext = wikiItems?.map(item => {
+        const truncatedContent = item.content && item.content.length > 1000 
+            ? item.content.substring(0, 1000) + '... [Truncated]'
+            : item.content;
+        return `### ${item.title}${item.category ? ` (${item.category})` : ''}\n${truncatedContent}`;
+    }).join('\n\n') || ''
+
     // 7. Build system prompt
     const currentDate = new Date().toISOString().split('T')[0]
-    const systemPrompt = `${agent.system_prompt || 'You are a helpful AI assistant.'}
+
+    // Only inject phone if it exists AND looks like a real phone number
+    // Reject anything that contains a channel prefix (telegram_, whatsapp_, etc.)
+    const isValidPhone = (phone: string | null) => {
+        if (!phone) return false;
+        if (/^(telegram|whatsapp|webchat|gmail|email|slack)_/i.test(phone)) return false;
+        return /^\+?[0-9\s\-().]{7,20}$/.test(phone);
+    };
+
+    const phoneContext = isValidPhone(contact.phone)
+        ? `\nCustomer Phone: ${contact.phone}`
+        : '';
+
+    // Define base guidelines per agent type
+    const baseGuidelines = {
+        support: `
+- Provide helpful and empathetic customer support.
+- Be concise and natural.
+- If you cannot solve a problem, offer to connect them with a human agent once.`,
+        appointment: `
+- Help customers check availability and book appointments.
+- ALWAYS check availability before confirming a time.
+- Be professional and efficient.`,
+        sales: `
+- Guide customers toward your services and products.
+- Answer pricing questions accurately and professionally.
+- Be persuasive but polite.`
+    }[agent.type as 'support' | 'appointment' | 'sales'] || '- Be a helpful assistant.'
+
+    const systemPrompt = `${agent.system_prompt || 'You are a professional, polite, and empathetic customer support agent.'}
 
 Current Date: ${currentDate}
-Customer Name: ${contact.name || 'Customer'}
-Customer Phone: ${contact.phone}
+Customer Name: ${contact.name || 'Customer'}${phoneContext}
 
-## Guidelines
-- Be natural and human-like.
-- If you cannot help with something, offer to connect them with a human.
-- Never make up information you don't have.`
+${knowledgeContext ? `## Knowledge Base\n${knowledgeContext}` : ''}
+
+## Base Guidelines
+${baseGuidelines}
+
+## Critical Technical Rules
+- Respond ONLY with valid JSON. No markdown. No conversational text outside the "reply" field.
+- Do not reveal internal IDs, system values, or technical identifiers.
+- Maintain a warm, professional, and empathetic tone.
+
+## Escalation Policy
+Reading user intent and sentiment is CRITICAL. You MUST set "should_escalate": true if:
+1. THE USER IS FRUSTRATED: They are using repetitive questions, capital letters for emphasis, or words like "terrible", "bad service", "angry".
+2. COMPLEX PROBLEM: The user has a problem you cannot solve with the available knowledge base after 2 attempts.
+3. EXPLICIT REQUEST: They ask for a manager, human, or person.
+4. NEGATIVE SENTIMENT: If you detect the user is losing patience, escalate gracefully.
+
+Schema:
+{
+  "reply": "your message to the customer here",
+  "intent": "pricing | support | onboarding | appointment | escalation | general",
+  "sentiment": "positive | neutral | negative | frustrated",
+  "should_escalate": false,
+  "confidence": 0.95,
+  "language": "en"
+}
+`
+
 
     // 8. Call Groq API with retry
     let aiResponse: string | null = null
@@ -194,21 +318,68 @@ Customer Phone: ${contact.phone}
         throw new Error('Failed to get AI response')
     }
 
-    // 9. Send reply via WhatsApp
-    await sendWhatsAppMessage(supabase, workspace_id, contact.phone, aiResponse)
+    // 9. Parse and Handle AI response
+    let replyContent: string
+    let intent = 'general'
+    let sentiment = 'neutral'
+    let shouldEscalate = false
+    let confidence = 0.5
+    let language = 'en'
 
-    // 10. Store AI message
+    try {
+        const parsed = JSON.parse(aiResponse)
+        replyContent = parsed.reply || aiResponse
+        intent = parsed.intent || 'general'
+        sentiment = parsed.sentiment || 'neutral'
+        shouldEscalate = parsed.should_escalate === true
+        confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0.5
+        language = parsed.language || 'en'
+    } catch {
+        console.warn('[Process] JSON parse failed — using raw text as reply')
+        replyContent = aiResponse || "I'm here to help."
+    }
+
+    // Handle AI-requested escalation
+    if (shouldEscalate) {
+        console.log('[Process] AI flagged for escalation')
+        await handleEscalation(supabase, workspace_id, conversation_id, conversation.contact_id, contact, `AI escalation: intent=${intent}`)
+    }
+
+    // Update contact sentiment if negative/frustrated
+    if (sentiment === 'frustrated' || sentiment === 'negative') {
+        await supabase
+            .from('contacts')
+            .update({ metadata: { last_sentiment: sentiment } })
+            .eq('id', conversation.contact_id)
+            .catch((err: any) => console.warn('[Process] Sentiment update failed:', err.message))
+    }
+
+    // 10. Send reply via appropriate channel
+    const allowedChannels = ['gmail', 'slack', 'telegram', 'webchat'];
+    if (!conversation.channel || !allowedChannels.includes(conversation.channel)) {
+        throw new Error(`Unsupported channel: ${conversation.channel || 'undefined'}`)
+    }
+    
+    const replyMeta = {
+        ...conversation.channel_metadata,
+        workspace_id,
+        phone: contact.phone 
+    }
+    await sendReply(conversation.channel, replyMeta, replyContent, supabase)
+
+    // 11. Store AI message
     await supabase.from('messages').insert({
         conversation_id: conversation_id,
-        content: aiResponse,
+        content: replyContent,
         sender: 'ai'
     })
 
-    // 11. Log interaction
+    // 12. Log interaction
     await supabase.from('ai_interactions').insert({
         workspace_id: workspace_id,
         conversation_id: conversation_id,
-        model: 'llama-3.3-70b-versatile'
+        model: 'llama-3.3-70b-versatile',
+        metadata: { intent, sentiment, confidence, language, should_escalate: shouldEscalate }
     })
 
     console.log('[Process] Complete!')
@@ -227,8 +398,9 @@ async function callGroqWithRetry(apiKey: string, systemPrompt: string, history: 
                 { role: 'system', content: systemPrompt },
                 ...history
             ],
-            temperature: 0.7,
-            max_tokens: 500
+            temperature: 0.3,
+            max_tokens: 500,
+            response_format: { type: 'json_object' }
         })
     })
 
@@ -238,7 +410,13 @@ async function callGroqWithRetry(apiKey: string, systemPrompt: string, history: 
     }
 
     const data = await response.json()
-    return data.choices[0]?.message?.content || "I'm here to help. What can I assist you with?"
+    const content = data.choices[0]?.message?.content?.trim()
+    
+    if (!content) {
+        throw new Error('LLM returned an empty response')
+    }
+    
+    return content
 }
 
 async function handleEscalation(
@@ -249,6 +427,14 @@ async function handleEscalation(
     contact: any,
     reason: string
 ): Promise<void> {
+    // 0. Fetch conversation channel info (since it's not passed)
+    const { data: conversation } = await supabase
+        .from('conversations')
+        .select('channel, channel_metadata')
+        .eq('id', conversation_id)
+        .single()
+
+    if (!conversation) throw new Error('Conversation not found during escalation')
     // 1. Update conversation - SET BOTH FLAGS
     await supabase
         .from('conversations')
@@ -277,8 +463,18 @@ async function handleEscalation(
     }
 
     // 3. Send customer notification
-    const fallbackMessage = "I understand this is important to you. Let me connect you with a team member who can better assist. Someone will reach out shortly."
-    await sendWhatsAppMessage(supabase, workspace_id, contact.phone, fallbackMessage)
+    const allowedChannels = ['gmail', 'slack', 'telegram', 'webchat'];
+    if (!conversation.channel || !allowedChannels.includes(conversation.channel)) {
+        throw new Error(`Unsupported channel: ${conversation.channel || 'undefined'}`)
+    }
+    
+    const fallbackMessage = "I understand this is important. I'm connecting you with a member of our team who can better assist you. Someone will be with you shortly."
+    const replyMeta = {
+        ...conversation.channel_metadata,
+        workspace_id,
+        phone: contact.phone
+    }
+    await sendReply(conversation.channel, replyMeta, fallbackMessage, supabase)
 
     // 4. Store AI message
     await supabase.from('messages').insert({
@@ -302,57 +498,22 @@ async function handleEscalation(
         .single()
 
     if (notificationSettings?.escalation_alerts && notificationSettings?.admin_phone) {
-        const adminAlert = `🚨 *Escalation Alert*\n\nReason: ${reason}\nCustomer: ${contact.name || 'Unknown'} (${contact.phone})`
-        try {
-            await sendWhatsAppMessage(supabase, workspace_id, notificationSettings.admin_phone, adminAlert)
-        } catch (alertError) {
-            console.error('[Process] Failed to send admin alert:', alertError)
+        const metaToken = Deno.env.get('META_WHATSAPP_TOKEN')
+        const metaPhoneId = Deno.env.get('META_WHATSAPP_PHONE_ID')
+
+        if (metaToken && metaPhoneId) {
+            const adminAlert = `🚨 *Escalation Alert*\n\nReason: ${reason}\nCustomer: ${contact.name || 'Unknown'} (${contact.phone})`
+            try {
+                const adminMeta = { workspace_id, phone: notificationSettings.admin_phone }
+                // Use a separate try-catch so one delivery failure doesn't block the whole process
+                await sendReply('whatsapp', adminMeta, adminAlert, supabase).catch(err => {
+                    console.error('[Queue Worker] Admin alert delivery failed:', err.message)
+                })
+            } catch (alertError) {
+                console.error('[Queue Worker] Failed to send admin alert:', alertError)
+            }
+        } else {
+            console.log('[Queue Worker] Admin alert skipped: WhatsApp credentials missing.')
         }
     }
-}
-
-async function sendWhatsAppMessage(
-    supabase: any,
-    workspace_id: string,
-    to: string,
-    message: string
-): Promise<void> {
-    const { data: whatsapp, error } = await supabase
-        .from('whatsapp_connections')
-        .select('twilio_account_sid, twilio_auth_token, twilio_phone_number, mode')
-        .eq('workspace_id', workspace_id)
-        .single()
-
-    if (error || !whatsapp) {
-        throw new Error('WhatsApp not connected for this workspace')
-    }
-
-    const fromNumber = whatsapp.mode === 'sandbox'
-        ? 'whatsapp:+14155238886'
-        : `whatsapp:${whatsapp.twilio_phone_number}`
-
-    const toNumber = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`
-
-    const response = await fetch(
-        `https://api.twilio.com/2010-04-01/Accounts/${whatsapp.twilio_account_sid}/Messages.json`,
-        {
-            method: 'POST',
-            headers: {
-                'Authorization': 'Basic ' + btoa(`${whatsapp.twilio_account_sid}:${whatsapp.twilio_auth_token}`),
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: new URLSearchParams({
-                From: fromNumber,
-                To: toNumber,
-                Body: message
-            })
-        }
-    )
-
-    if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Twilio error: ${errorText}`)
-    }
-
-    console.log('[Twilio] Message sent successfully')
 }

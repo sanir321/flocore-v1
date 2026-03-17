@@ -12,7 +12,7 @@ interface ChatInputProps {
 export const ChatInput = ({ onSend, onTyping, disabled, placeholder = "Type a message..." }: ChatInputProps) => {
     const [value, setValue] = useState('')
     const textareaRef = useRef<HTMLTextAreaElement>(null)
-    const typingTimeoutRef = useRef<any>(null)
+    const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     // Auto-resize logic
     useEffect(() => {
@@ -22,6 +22,17 @@ export const ChatInput = ({ onSend, onTyping, disabled, placeholder = "Type a me
             textareaRef.current.style.height = `${Math.min(scrollHeight, 120)}px`
         }
     }, [value])
+
+    // Cleanup typing timeout on unmount
+    useEffect(() => {
+        return () => {
+            if (typingTimeoutRef.current) {
+                clearTimeout(typingTimeoutRef.current)
+                typingTimeoutRef.current = null
+                onTyping(false)
+            }
+        }
+    }, [onTyping])
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {

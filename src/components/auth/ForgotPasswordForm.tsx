@@ -55,6 +55,7 @@ export default function ForgotPasswordForm() {
                             required
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
+                            aria-label="Email address"
                         />
                     </div>
                 </CardContent>

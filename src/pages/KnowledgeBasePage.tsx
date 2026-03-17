@@ -1,7 +1,7 @@
 
-import { useEffect, useState } from 'react'
-import { useWorkspace } from '@/context/WorkspaceContext'
-import { supabase } from '@/lib/supabase'
+import { useState } from 'react'
+import { useWorkspace } from '@/hooks/queries/useWorkspace'
+import { useKnowledgeBase } from '@/hooks/queries/useKnowledgeBase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -16,70 +16,53 @@ interface KnowledgeDoc {
     id: string
     title: string
     content: string
+    category?: string
+    embedding?: any
     created_at: string | null
 }
 
 export default function KnowledgeBasePage() {
-    const { workspace, loading: workspaceLoading } = useWorkspace()
-    const { toast } = useToast()
-    const [docs, setDocs] = useState<KnowledgeDoc[]>([])
-    const [loading, setLoading] = useState(true)
+    const { data: workspace } = useWorkspace()
+    const workspaceId = workspace?.id
+
+    const { 
+        data: docsData, 
+        isLoading: docsLoading, 
+        createDoc, 
+        updateDoc, 
+        deleteDoc
+    } = useKnowledgeBase(workspaceId)
+    
     const [searchQuery, setSearchQuery] = useState('')
+    const { toast } = useToast()
 
     // Dialog State
     const [isDialogOpen, setIsDialogOpen] = useState(false)
     const [editingDoc, setEditingDoc] = useState<KnowledgeDoc | null>(null)
     const [formData, setFormData] = useState({ title: '', content: '' })
 
-    useEffect(() => {
-        if (workspace?.id) fetchDocs()
-    }, [workspace?.id])
-
-    const fetchDocs = async () => {
-        if (!workspace?.id) return
-        const { data, error } = await supabase
-            .from('knowledge_base')
-            .select('*')
-            .eq('workspace_id', workspace.id)
-            .order('created_at', { ascending: false })
-
-        if (error) {
-            console.error('Error fetching docs:', error)
-        } else {
-            setDocs(data || [])
-        }
-        setLoading(false)
-    }
-
     const handleSave = async () => {
         if (!workspace?.id || !formData.title.trim() || !formData.content.trim()) return
 
         try {
             if (editingDoc) {
-                const { error } = await supabase
-                    .from('knowledge_base')
-                    .update({ title: formData.title, content: formData.content })
-                    .eq('id', editingDoc.id)
-
-                if (error) throw error
+                await updateDoc({ 
+                    id: editingDoc.id, 
+                    title: formData.title, 
+                    content: formData.content 
+                })
                 toast({ title: 'Updated', description: 'Document updated successfully.' })
             } else {
-                const { error } = await supabase
-                    .from('knowledge_base')
-                    .insert({
-                        workspace_id: workspace.id,
-                        title: formData.title,
-                        content: formData.content
-                    })
-
-                if (error) throw error
+                await createDoc({
+                    title: formData.title,
+                    content: formData.content
+                } as any)
                 toast({ title: 'Created', description: 'Document created successfully.' })
             }
 
             setIsDialogOpen(false)
             setFormData({ title: '', content: '' })
             setEditingDoc(null)
-            fetchDocs()
         } catch (error: any) {
             toast({ title: 'Error', description: error.message, variant: 'destructive' })
         }
@@ -88,12 +71,11 @@ export default function KnowledgeBasePage() {
     const handleDelete = async (id: string) => {
         if (!confirm('Are you sure you want to delete this document?')) return
 
-        const { error } = await supabase.from('knowledge_base').delete().eq('id', id)
-        if (error) {
-            toast({ title: 'Error', description: error.message, variant: 'destructive' })
-        } else {
+        try {
+            await deleteDoc(id)
             toast({ title: 'Deleted', description: 'Document deleted.' })
-            setDocs(prev => prev.filter(d => d.id !== id))
+        } catch (error: any) {
+            toast({ title: 'Error', description: error.message, variant: 'destructive' })
         }
     }
 
@@ -109,12 +91,12 @@ export default function KnowledgeBasePage() {
         setIsDialogOpen(true)
     }
 
-    const filteredDocs = docs.filter(d =>
-        d.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        d.content.toLowerCase().includes(searchQuery.toLowerCase())
+    const filteredDocs = (docsData || []).filter(d =>
+        (d.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (d.content || '').toLowerCase().includes(searchQuery.toLowerCase())
     )
 
-    if (workspaceLoading || loading) return <FlowCoreLoader />
+    if (docsLoading) return <FlowCoreLoader />
 
     return (
         <div className="flex-1 h-full flex flex-col p-6 space-y-6 overflow-hidden">
@@ -161,16 +143,28 @@ export default function KnowledgeBasePage() {
                                     <FileText className="h-4 w-4 text-primary" />
                                     {doc.title}
                                 </CardTitle>
-                                <CardDescription className="text-xs">
-                                    {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : 'Unknown Date'}
-                                </CardDescription>
+                                <div className="flex items-center justify-between gap-2">
+                                    <CardDescription className="text-xs">
+                                        {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : 'Unknown Date'}
+                                    </CardDescription>
+                                    {doc.embedding ? (
+                                        <div className="flex items-center gap-1 text-[10px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-100">
+                                            <Sparkles className="h-2.5 w-2.5" />
+                                            Synced
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-100 italic">
+                                            Syncing...
+                                        </div>
+                                    )}
+                                </div>
                             </CardHeader>
                             <CardContent>
                                 <p className="text-sm text-muted-foreground line-clamp-3 mb-4 h-[4.5em]">
                                     {doc.content}
                                 </p>
                                 <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Button variant="ghost" size="sm" onClick={() => openEdit(doc)}>
+                                    <Button variant="ghost" size="sm" onClick={() => openEdit(doc as any)}>
                                         <Edit2 className="h-4 w-4" />
                                     </Button>
                                     <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => handleDelete(doc.id)}>

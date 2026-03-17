@@ -2,107 +2,17 @@
 // supabase/functions/process-message/index.ts
 // Processes incoming messages with AI and sends replies
 
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { sendReply } from '../_shared/reply-router.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// Tool definitions for Groq
-const appointmentTools = [
-    {
-        type: 'function',
-        function: {
-            name: 'check_availability',
-            description: 'Check available appointment slots for a specific date',
-            parameters: {
-                type: 'object',
-                properties: {
-                    date: {
-                        type: 'string',
-                        description: 'The date to check availability for (YYYY-MM-DD format)'
-                    },
-                    duration_minutes: {
-                        type: 'number',
-                        description: 'Duration of the appointment in minutes (default: 30)'
-                    }
-                },
-                required: ['date']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'book_appointment',
-            description: 'Book an appointment at a specific time',
-            parameters: {
-                type: 'object',
-                properties: {
-                    start_time: {
-                        type: 'string',
-                        description: 'Start time in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)'
-                    },
-                    duration_minutes: {
-                        type: 'number',
-                        description: 'Duration of the appointment in minutes'
-                    },
-                    customer_name: {
-                        type: 'string',
-                        description: 'Name of the customer booking the appointment'
-                    },
-                    notes: {
-                        type: 'string',
-                        description: 'Optional notes for the appointment'
-                    }
-                },
-                required: ['start_time', 'duration_minutes', 'customer_name']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'reschedule_appointment',
-            description: 'Reschedule an existing appointment to a new time',
-            parameters: {
-                type: 'object',
-                properties: {
-                    appointment_id: {
-                        type: 'string',
-                        description: 'ID of the appointment to reschedule'
-                    },
-                    new_start_time: {
-                        type: 'string',
-                        description: 'New start time in ISO 8601 format'
-                    }
-                },
-                required: ['appointment_id', 'new_start_time']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'cancel_appointment',
-            description: 'Cancel an existing appointment',
-            parameters: {
-                type: 'object',
-                properties: {
-                    appointment_id: {
-                        type: 'string',
-                        description: 'ID of the appointment to cancel'
-                    }
-                },
-                required: ['appointment_id']
-            }
-        }
-    }
-]
+// ... unchanged tool definitions ...
 
-serve(async (req: Request) => {
+Deno.serve(async (req: Request) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
     }
@@ -113,15 +23,19 @@ serve(async (req: Request) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
+    let workspace_id = 'unknown'
+
     try {
-        const { workspace_id, conversation_id, message_content, customer_phone, contact_name } = await req.json()
+        const body = await req.json()
+        workspace_id = body.workspace_id || workspace_id
+        const { conversation_id, message_content, customer_phone, contact_name } = body
 
         console.log(`[Process] Starting for conversation: ${conversation_id}`)
 
         // 1. CHECK IF CONVERSATION IS ASSIGNED TO HUMAN
         const { data: conversation, error: convError } = await supabase
             .from('conversations')
-            .select('assigned_to_human, escalated, status, contact_id')
+            .select('assigned_to_human, escalated, status, contact_id, channel, channel_metadata')
             .eq('id', conversation_id)
             .single()
 
@@ -134,90 +48,31 @@ serve(async (req: Request) => {
             })
         }
 
-        // 2. CHECK ESCALATION RULES FIRST
+        // 1.1 CHECK ESCALATION RULES
         const { data: escalationCheck } = await supabase.rpc('should_escalate_message', {
             p_workspace_id: workspace_id,
             p_message_content: message_content
         })
 
         if (escalationCheck?.should_escalate) {
-            console.log(`[Process] Escalating: ${escalationCheck.reason}`)
-
-            // Update conversation to escalated
-            await supabase
-                .from('conversations')
-                .update({
-                    escalated: true,
-                    escalation_reason: escalationCheck.reason,
-                    escalated_at: new Date().toISOString(),
-                    status: 'todo'
-                })
-                .eq('id', conversation_id)
-
-            // --- 1. TAG CONTACT AS ESCALATED ---
-            // Fetch current tags
-            const { data: contactData } = await supabase
-                .from('contacts')
-                .select('tags')
-                .eq('id', conversation.contact_id)
-                .single()
-
-            const currentTags = contactData?.tags || []
-            if (!currentTags.includes('Escalated')) {
-                await supabase
-                    .from('contacts')
-                    .update({ tags: [...currentTags, 'Escalated'] })
-                    .eq('id', conversation.contact_id)
-            }
-
-            // Send escalation message to customer
-            const escalationMessage = "I understand this is important to you. Let me connect you with a team member who can better assist. Someone will reach out shortly."
-
-            await sendWhatsAppMessage(supabase, workspace_id, customer_phone, escalationMessage)
-
-            // Store AI message
-            await supabase.from('messages').insert({
-                conversation_id: conversation_id,
-                content: escalationMessage,
-                sender: 'ai'
-            })
-
-            // --- 2. INSERT SYSTEM ALERT MESSAGE (Internal only) ---
-            await supabase.from('messages').insert({
-                conversation_id: conversation_id,
-                content: `⚠️ System Alert: Conversation escalated. Reason: ${escalationCheck.reason}`,
-                sender: 'system'
-            })
-
-
-            // --- 3. SEND ADMIN ALERT (WhatsApp) ---
-            const { data: notificationSettings } = await supabase
-                .from('notification_settings')
-                .select('admin_phone, escalation_alerts')
-                .eq('workspace_id', workspace_id)
-                .single()
-
-            if (notificationSettings?.escalation_alerts && notificationSettings?.admin_phone) {
-                console.log(`[Process] Sending admin alert to ${notificationSettings.admin_phone}`)
-                const adminAlert = `🚨 *Escalation Alert*\n\nReason: ${escalationCheck.reason}\nCustomer: ${contact_name || 'Unknown'} (${customer_phone})\n\nUser is requesting help or used trigger words.`
-
-                try {
-                    await sendWhatsAppMessage(supabase, workspace_id, notificationSettings.admin_phone, adminAlert)
-                } catch (alertError) {
-                    console.error('[Process] Failed to send admin alert:', alertError)
-                    // Don't fail the whole request just because admin alert failed
-                }
-            }
-
-            return new Response(JSON.stringify({ escalated: true, reason: escalationCheck.reason }), {
+            console.log(`[Process] Escalating due to keywords: ${escalationCheck.reason}`)
+            await handleEscalation(supabase, workspace_id, conversation_id, conversation.contact_id, { phone: customer_phone, name: contact_name }, escalationCheck.reason)
+            
+            return new Response(JSON.stringify({ 
+                success: true, 
+                escalated: true, 
+                reason: escalationCheck.reason,
+                reply: "I understand this is important. Connecting you with a member of our team now." 
+            }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             })
         }
 
-        // 3. FETCH AGENT CONFIGURATION
+
+        // 2. FETCH AGENT CONFIGURATION
         const { data: agent } = await supabase
             .from('agents')
-            .select('*')
+            .select('id, system_prompt, use_cases, services, config, business_hours')
             .eq('workspace_id', workspace_id)
             .eq('active', true)
             .single()
@@ -230,14 +85,60 @@ serve(async (req: Request) => {
             })
         }
 
-        // 4. FETCH KNOWLEDGE BASE
-        const { data: wikiItems } = await supabase
-            .from('knowledge_base')
-            .select('title, content')
-            .eq('workspace_id', workspace_id)
-            .limit(10)
+        // Update conversation with agent_id if not already set
+        await supabase
+            .from('conversations')
+            .update({ agent_id: agent.id })
+            .eq('id', conversation_id)
+            .is('agent_id', null)
 
-        const knowledgeContext = wikiItems?.map(item => `## ${item.title}\n${item.content}`).join('\n\n') || ''
+        // 4. FETCH KNOWLEDGE BASE (Vector Search)
+        console.log('[Process] Generating embedding for query...')
+        
+        let knowledgeContext = ''
+        try {
+            // @ts-ignore: Supabase AI is available in the Edge Runtime
+            const model = new Supabase.ai.Session('gte-small')
+            const queryEmbedding = await model.run(message_content, {
+                mean_pool: true,
+                normalize: true,
+            })
+
+            const { data: wikiItems, error: wikiError } = await supabase.rpc('match_knowledge_base', {
+                query_embedding: queryEmbedding,
+                match_threshold: 0.5,
+                match_count: 5,
+                p_workspace_id: workspace_id,
+                p_agent_id: agent.id
+            })
+
+            if (wikiError) {
+              console.warn('[Process] Vector search failed, falling back to recent items:', wikiError.message)
+              // Fallback to recent items if vector search fails
+              const { data: fallbackItems } = await supabase
+                  .from('knowledge_base')
+                  .select('title, content, category')
+                  .eq('workspace_id', workspace_id)
+                  .order('updated_at', { ascending: false })
+                  .limit(3)
+              
+              knowledgeContext = fallbackItems?.map(item => `### ${item.title}\n${item.content}`).join('\n\n') || ''
+            } else {
+              knowledgeContext = wikiItems?.map((item: any) => `### ${item.title}\n${item.content}`).join('\n\n') || ''
+              console.log(`[Process] Found ${wikiItems?.length || 0} relevant knowledge base items via vector search.`)
+            }
+        } catch (searchError: any) {
+            console.error('[Process] Vector search fatal error:', searchError.message)
+            // Final fallback
+            const { data: fallbackItems } = await supabase
+                .from('knowledge_base')
+                .select('title, content, category')
+                .eq('workspace_id', workspace_id)
+                .order('updated_at', { ascending: false })
+                .limit(3)
+            
+            knowledgeContext = fallbackItems?.map(item => `### ${item.title}\n${item.content}`).join('\n\n') || ''
+        }
 
         // 5. FETCH CONVERSATION HISTORY
         const { data: recentMessages } = await supabase
@@ -253,44 +154,66 @@ serve(async (req: Request) => {
         })) || []
 
         // 6. BUILD SYSTEM PROMPT
-        const isAppointmentAgent = agent.use_cases?.includes('appointments') || true // Default to true if not specified
+        const isAppointmentAgent = agent.use_cases?.includes('appointments') || agent.type === 'appointment'
+
+        // Agent-type specific behavioral defaults (can be overridden by user prompt)
+        const typeGuidelines = {
+            support: "Focus on helpfulness, empathy, and active listening. Escalate if technical issues persist.",
+            appointment: "Focus on checking availability and scheduling efficiently using tools.",
+            sales: "Focus on understanding needs, highlighting benefits, and qualifying leads."
+        }[agent.type as 'support' | 'appointment' | 'sales'] || "Be a helpful professional assistant."
+
         const currentDate = new Date().toISOString().split('T')[0]
         const currentTime = new Date().toLocaleTimeString('en-US', { hour12: true })
 
-        // Construct Service List
         const servicesList = agent.services?.length
             ? agent.services.map((s: any) => `- ${s.name} (${s.duration} mins)`).join('\n')
             : '- Standard Appointment (30 mins)'
 
-        // Construct Personality Instructions
-        const tone = agent.config?.tone || 'friendly'
-        const useEmojis = agent.config?.use_emojis !== false
-        const greeting = agent.config?.greeting || "I'm here to help."
+        // PRIORITIZE: User prompt (agent.system_prompt) is the core.
+        // Guidelines and rules are supplementary.
+        const systemPrompt = `
+# Role & Primary Instructions
+${agent.system_prompt || 'You are a helpful AI assistant.'}
 
-        const systemPrompt = `${agent.system_prompt || 'You are a helpful AI assistant.'}
+# Behavioral Guidelines
+- Type: ${agent.type || 'general'}
+- Style: ${typeGuidelines}
 
-Current Date: ${currentDate}
-Current Time: ${currentTime}
-Customer Name: ${contact_name || 'Customer'}
-Customer Phone: ${customer_phone}
+# Context
+- Date: ${currentDate}
+- Time: ${currentTime}
+- Customer: ${contact_name || 'Customer'} (${customer_phone})
 
-## Business Configuration
-Services Available:
+# Available Services
 ${servicesList}
 
-## Personality & Style
-- Tone: ${tone}
-- Emojis: ${useEmojis ? 'Allowed' : 'Forbidden'}
-- Greeting Pattern: "${greeting}"
+${knowledgeContext ? `# Knowledge Base\n${knowledgeContext}` : ''}
 
-## Guidelines
-- Be natural and human-like. Avoid robotic questionnaires.
-- Bundle questions together (e.g. "What day and time works best for you?" instead of asking separately).
-- If the user asks for a specific service, look up its duration properly.
-- If you cannot help with something, offer to connect them with a human.
-- Never make up information you don't have.
-${isAppointmentAgent ? '- Use the provided tools to check availability and book appointments. ALWAYS check availability before confirming a time.' : ''}
+# Operational Rules
+1. Respond ONLY with valid JSON.
+2. If tool fails, be polite and ask for contact details to follow up manually.
+3. Use 'update_contact_info' to capture name/email/phone.
+4. Use 'escalate_to_human' if explicitly requested.
+
+# Sentiment & Escalation Policy
+You must monitor user sentiment. Set "should_escalate": true if:
+- User expresses frustration (anger, impatience, repeat failure).
+- Complex request outside your knowledge base or tool capabilities.
+- Direct request for a human or manager.
+- Sentiment is consistently negative.
+
+JSON Output Schema:
+{
+  "reply": "your message",
+  "intent": "pricing | support | appointment | escalation | other",
+  "sentiment": "positive | neutral | negative",
+  "should_escalate": boolean,
+  "confidence": number,
+  "language": "string"
+}
 `
+
 
         // 7. CALL GROQ API
         console.log('[Process] Calling Groq API...')
@@ -301,8 +224,13 @@ ${isAppointmentAgent ? '- Use the provided tools to check availability and book 
                 { role: 'system', content: systemPrompt },
                 ...conversationHistory
             ],
-            temperature: 0.7,
+            temperature: 0.3,
             max_tokens: 500
+        }
+
+        // Only add JSON mode when NOT using tools (they are incompatible)
+        if (!isAppointmentAgent) {
+            groqPayload.response_format = { type: 'json_object' }
         }
 
         // Only add tools for appointment agents
@@ -353,6 +281,10 @@ ${isAppointmentAgent ? '- Use the provided tools to check availability and book 
                         result = await executeRescheduleAppointment(supabase, workspace_id, functionArgs)
                     } else if (functionName === 'cancel_appointment') {
                         result = await executeCancelAppointment(supabase, workspace_id, functionArgs)
+                    } else if (functionName === 'update_contact_info') {
+                        result = await executeUpdateContact(supabase, conversation.contact_id, functionArgs)
+                    } else if (functionName === 'escalate_to_human') {
+                        result = await executeEscalateToHuman(supabase, workspace_id, conversation_id, conversation.contact_id, functionArgs.reason)
                     } else {
                         result = { error: `Unknown tool: ${functionName}` }
                         toolFailed = true
@@ -378,33 +310,16 @@ ${isAppointmentAgent ? '- Use the provided tools to check availability and book 
                 }
             }
 
-            // If any tool failed, escalate
+            // If any tool failed, we DO NOT escalate immediately.
+            // Instead, we let the AI see the error and explain it to the user.
+            // Only escalate if it's a critical system failure, but for tool errors (like "Calendar not connected"),
+            // the AI should be able to say "I'm sorry, I can't check the calendar right now."
             if (toolFailed) {
-                console.log('[Process] Tool failed - escalating conversation')
-
-                await supabase
-                    .from('conversations')
-                    .update({
-                        escalated: true,
-                        escalation_reason: 'tool_failure',
-                        escalated_at: new Date().toISOString(),
-                        status: 'todo'
-                    })
-                    .eq('id', conversation_id)
-
-                const failureMessage = "I'm having trouble processing your request. Let me connect you with a team member who can help."
-                await sendWhatsAppMessage(supabase, workspace_id, customer_phone, failureMessage)
-
-                await supabase.from('messages').insert({
-                    conversation_id: conversation_id,
-                    content: failureMessage,
-                    sender: 'ai'
-                })
-
-                return new Response(JSON.stringify({ escalated: true, reason: 'tool_failure' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-                })
+                console.warn('[Process] Some tools failed, but continuing conversation so AI can explain.')
+                // We simply continue. The 'content' of the tool result will contain the error JSON.
+                // The AI will see `{"error": "Calendar not connected"}` and generate a response.
             }
+
 
             // Get final response with tool results
             groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -421,8 +336,9 @@ ${isAppointmentAgent ? '- Use the provided tools to check availability and book 
                         assistantMessage,
                         ...toolResults
                     ],
-                    temperature: 0.7,
-                    max_tokens: 500
+                    temperature: 0.3,
+                    max_tokens: 500,
+                    response_format: { type: 'json_object' }
                 })
             })
 
@@ -434,12 +350,50 @@ ${isAppointmentAgent ? '- Use the provided tools to check availability and book 
             assistantMessage = groqData.choices[0].message
         }
 
-        // 9. SEND REPLY VIA TWILIO
-        const replyContent = assistantMessage.content || "I'm here to help. What can I assist you with?"
+        // 9. PARSE STRUCTURED JSON RESPONSE
+        const rawContent = assistantMessage.content || ''
+        let replyContent: string
+        let intent = 'general'
+        let sentiment = 'neutral'
+        let shouldEscalate = false
+        let confidence = 0.5
+        let language = 'en'
 
-        console.log(`[Process] Sending reply: "${replyContent.substring(0, 50)}..."`)
+        try {
+            const parsed = JSON.parse(rawContent)
+            replyContent = parsed.reply || rawContent
+            intent = parsed.intent || 'general'
+            sentiment = parsed.sentiment || 'neutral'
+            shouldEscalate = parsed.should_escalate === true
+            confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0.5
+            language = parsed.language || 'en'
+        } catch {
+            // Model didn't return valid JSON — use raw text as reply
+            console.warn('[Process] JSON parse failed — using raw text as reply')
+            replyContent = rawContent || "I'm here to help. What can I assist you with?"
+        }
 
-        await sendWhatsAppMessage(supabase, workspace_id, customer_phone, replyContent)
+        // Handle AI-requested escalation
+        if (shouldEscalate) {
+            console.log('[Process] AI flagged for escalation')
+            await handleEscalation(supabase, workspace_id, conversation_id, conversation.contact_id, { phone: customer_phone, name: contact_name }, `AI escalation: intent=${intent}`)
+        }
+
+        // Update contact sentiment if negative/frustrated
+        if (sentiment === 'frustrated' || sentiment === 'negative') {
+            await supabase
+                .from('contacts')
+                .update({ metadata: { last_sentiment: sentiment } })
+                .eq('id', conversation.contact_id)
+                .catch((err: any) => console.warn('[Process] Sentiment update failed:', err.message))
+        }
+
+        const replyMetadata = {
+            workspace_id,
+            phone: customer_phone,
+            ...conversation.channel_metadata
+        }
+        await sendReply(conversation.channel, replyMetadata, replyContent, supabase)
 
         // 10. STORE AI MESSAGE
         await supabase.from('messages').insert({
@@ -448,14 +402,15 @@ ${isAppointmentAgent ? '- Use the provided tools to check availability and book 
             sender: 'ai'
         })
 
-        // 11. LOG AI INTERACTION
+        // 11. LOG AI INTERACTION with structured fields
         await supabase.from('ai_interactions').insert({
             workspace_id: workspace_id,
             conversation_id: conversation_id,
             input_tokens: groqData.usage?.prompt_tokens || 0,
             output_tokens: groqData.usage?.completion_tokens || 0,
             model: 'llama-3.3-70b-versatile',
-            tool_calls: assistantMessage.tool_calls?.map((t: any) => t.function.name) || []
+            tool_calls: assistantMessage.tool_calls?.map((t: any) => t.function.name) || [],
+            metadata: { intent, sentiment, confidence, language, should_escalate: shouldEscalate }
         })
 
         console.log('[Process] Complete!')
@@ -467,30 +422,25 @@ ${isAppointmentAgent ? '- Use the provided tools to check availability and book 
     } catch (error: any) {
         console.error('[Process] Fatal error:', error)
 
-        // Log to audit_logs
-        try {
-            const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-            const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-            const supabase = createClient(supabaseUrl, supabaseServiceKey)
+            // Log to audit_logs
+            try {
+                const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+                const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+                const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-            // Try to recover workspace_id from request cloning if needed, but here we might have it in scope if we defined it outside try?
-            // Actually, workspace_id is defined inside try. We can't access it here easily unless we move declaration.
-            // For now, use fallback or try to parsing again if req body wasn't consumed? No, body consumed.
-            // We'll rely on the error details.
-
-            await supabase.from('audit_logs').insert({
-                workspace_id: '9c1d9589-bdb3-4743-8b50-d3aba94a5e17', // Fallback ID since we might not have it in catch scope
-                entity_type: 'process_message_error',
-                action: 'failure',
-                details: {
-                    error_message: error?.message || String(error),
-                    error_stack: error?.stack,
-                    timestamp: new Date().toISOString()
-                }
-            })
-        } catch (logError) {
-            console.error('Failed to log to audit_logs:', logError)
-        }
+                await supabase.from('audit_logs').insert({
+                    workspace_id: workspace_id,
+                    resource_type: 'process_message_error',
+                    action: 'failure',
+                    metadata: {
+                        error_message: error?.message || String(error),
+                        error_stack: error?.stack,
+                        timestamp: new Date().toISOString()
+                    }
+                })
+            } catch (logError) {
+                console.error('Failed to log to audit_logs:', logError)
+            }
 
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
@@ -501,53 +451,6 @@ ${isAppointmentAgent ? '- Use the provided tools to check availability and book 
 
 // ============ HELPER FUNCTIONS ============
 
-async function sendWhatsAppMessage(
-    supabase: any,
-    workspace_id: string,
-    to: string,
-    message: string
-): Promise<void> {
-    // Fetch Twilio credentials
-    const { data: whatsapp, error } = await supabase
-        .from('whatsapp_connections')
-        .select('twilio_account_sid, twilio_auth_token, twilio_phone_number, mode')
-        .eq('workspace_id', workspace_id)
-        .single()
-
-    if (error || !whatsapp) {
-        throw new Error('WhatsApp not connected for this workspace')
-    }
-
-    const fromNumber = whatsapp.mode === 'sandbox'
-        ? 'whatsapp:+14155238886'
-        : `whatsapp:${whatsapp.twilio_phone_number}`
-
-    const toNumber = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`
-
-    const response = await fetch(
-        `https://api.twilio.com/2010-04-01/Accounts/${whatsapp.twilio_account_sid}/Messages.json`,
-        {
-            method: 'POST',
-            headers: {
-                'Authorization': 'Basic ' + btoa(`${whatsapp.twilio_account_sid}:${whatsapp.twilio_auth_token}`),
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: new URLSearchParams({
-                From: fromNumber,
-                To: toNumber,
-                Body: message
-            })
-        }
-    )
-
-    if (!response.ok) {
-        const errorText = await response.text()
-        console.error('[Twilio] Send error:', errorText)
-        throw new Error(`Twilio error: ${errorText}`)
-    }
-
-    console.log('[Twilio] Message sent successfully')
-}
 
 async function executeCheckAvailability(
     supabase: any,
@@ -739,12 +642,31 @@ async function executeBookAppointment(
             notes: notes,
             metadata: { duration_minutes }
         })
-        .select()
+        .select('id')
         .single()
 
     if (dbError) {
         console.error('[DB] Appointment insert error:', dbError)
         return { error: 'Failed to save appointment' }
+    }
+
+    // Send Admin Notification (WhatsApp)
+    const { data: notificationSettings } = await supabase
+        .from('notification_settings')
+        .select('admin_phone, booking_alerts')
+        .eq('workspace_id', workspace_id)
+        .single()
+
+    if (notificationSettings?.booking_alerts && notificationSettings?.admin_phone) {
+        console.log(`[Process] Sending booking alert to ${notificationSettings.admin_phone}`)
+        const adminAlert = `📅 *New Appointment Booked*\n\nCustomer: ${customer_name}\nTime: ${startDate.toLocaleDateString()} at ${startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\nNotes: ${notes || 'None'}`
+
+        try {
+            const alertMetadata = { workspace_id, phone: notificationSettings.admin_phone }
+            await sendReply('whatsapp', alertMetadata, adminAlert, supabase)
+        } catch (alertError) {
+            console.error('[Process] Failed to send booking alert:', alertError)
+        }
     }
 
     return {
@@ -764,7 +686,7 @@ async function executeRescheduleAppointment(
     // Fetch appointment
     const { data: appointment } = await supabase
         .from('appointments')
-        .select('*, metadata')
+        .select('metadata')
         .eq('id', appointment_id)
         .eq('workspace_id', workspace_id)
         .single()
@@ -786,8 +708,6 @@ async function executeRescheduleAppointment(
             status: 'rescheduled'
         })
         .eq('id', appointment_id)
-
-    // TODO: Update Google Calendar event
 
     return {
         success: true,
@@ -813,7 +733,134 @@ async function executeCancelAppointment(
         return { error: 'Failed to cancel appointment' }
     }
 
-    // TODO: Delete Google Calendar event
-
     return { success: true, message: 'Appointment cancelled' }
+}
+
+async function executeUpdateContact(
+    supabase: any,
+    contact_id: string,
+    args: { email?: string; name?: string; phone?: string }
+): Promise<any> {
+    const updates: any = {}
+    if (args.email) updates.email = args.email
+    if (args.name) updates.name = args.name
+    if (args.phone) updates.phone = args.phone
+
+    if (Object.keys(updates).length === 0) return { success: true, message: 'No updates provided' }
+
+    const { error } = await supabase
+        .from('contacts')
+        .update(updates)
+        .eq('id', contact_id)
+
+    if (error) {
+        console.error('[DB] Contact update error:', error)
+        return { error: 'Failed to update contact info' }
+    }
+
+    return { success: true, message: 'Contact details updated' }
+}
+
+async function executeEscalateToHuman(
+    supabase: any,
+    workspace_id: string,
+    conversation_id: string,
+    contact_id: string,
+    reason: string
+): Promise<any> {
+    // 1. Update conversation
+    await supabase
+        .from('conversations')
+        .update({
+            escalated: true,
+            assigned_to_human: true,
+            escalation_reason: reason,
+            escalated_at: new Date().toISOString(),
+            status: 'todo'
+        })
+        .eq('id', conversation_id)
+
+    // 2. Tag Contact
+    const { data: contactData } = await supabase
+        .from('contacts')
+        .select('tags')
+        .eq('id', contact_id)
+        .single()
+
+    const currentTags = contactData?.tags || []
+    if (!currentTags.includes('Escalated')) {
+        await supabase
+            .from('contacts')
+            .update({ tags: [...currentTags, 'Escalated'] })
+            .eq('id', contact_id)
+    }
+
+    // 3. System Alert
+    await supabase.from('messages').insert({
+        conversation_id: conversation_id,
+        content: `⚠️ System Alert: AI initiated escalation. Reason: ${reason}`,
+        sender: 'system'
+    })
+
+    return { success: true, message: 'Conversation escalated to human agent' }
+}
+
+async function handleEscalation(
+    supabase: ReturnType<typeof createClient>,
+    workspace_id: string,
+    conversation_id: string,
+    contact_id: string,
+    contact: { phone: string; name: string },
+    reason: string
+): Promise<void> {
+    // 1. Update conversation - SET BOTH FLAGS
+    await supabase
+        .from('conversations')
+        .update({
+            escalated: true,
+            assigned_to_human: true,
+            escalation_reason: reason,
+            escalated_at: new Date().toISOString(),
+            status: 'todo'
+        })
+        .eq('id', conversation_id)
+
+    // 2. Tag contact
+    const { data: contactData } = await supabase
+        .from('contacts')
+        .select('tags')
+        .eq('id', contact_id)
+        .single()
+
+    const currentTags = contactData?.tags || []
+    if (!currentTags.includes('Escalated')) {
+        await supabase
+            .from('contacts')
+            .update({ tags: [...currentTags, 'Escalated'] })
+            .eq('id', contact_id)
+    }
+
+    // 3. System Alert
+    await supabase.from('messages').insert({
+        conversation_id: conversation_id,
+        content: `⚠️ System Alert: Conversation escalated. Reason: ${reason}`,
+        sender: 'system'
+    })
+
+    // 4. Send admin alert if configured
+    const { data: notificationSettings } = await supabase
+        .from('notification_settings')
+        .select('admin_phone, escalation_alerts')
+        .eq('workspace_id', workspace_id)
+        .single()
+
+    if (notificationSettings?.escalation_alerts && notificationSettings?.admin_phone) {
+        const adminAlert = `🚨 *Escalation Alert*\n\nReason: ${reason}\nCustomer: ${contact.name || 'Unknown'} (${contact.phone})`
+        try {
+            const adminMeta = { workspace_id, phone: notificationSettings.admin_phone }
+            await sendReply('whatsapp', adminMeta, adminAlert, supabase)
+        } catch (alertError) {
+            console.error('[Process] Failed to send admin alert:', alertError)
+        }
+    }
 }

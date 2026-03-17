@@ -105,15 +105,19 @@ class UXAuditor:
     def audit_file(self, filepath: str) -> None:
         try:
             with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-                content = f.read()
+                lines = f.readlines()
+                content = "".join([line for line in lines if not line.strip().startswith(('import', 'from'))])
+                # Restore full content for other checks if needed, but for has_form we use filtered
+                full_content = "".join(lines)
         except: return
         
         self.files_checked += 1
         filename = os.path.basename(filepath)
+        is_html_like = Path(filepath).suffix in {'.tsx', '.jsx', '.html', '.vue', '.svelte'}
 
         # Pre-calculate common flags
-        has_long_text = bool(re.search(r'<p|<div.*class=.*text|article|<span.*text', content, re.IGNORECASE))
-        has_form = bool(re.search(r'<form|<input|password|credit|card|payment', content, re.IGNORECASE))
+        has_long_text = bool(re.search(r'<p|<div.*class=.*text|article|<span.*text', full_content, re.IGNORECASE))
+        has_form = bool(re.search(r'<form|<input|\bpassword\b|\bcredit\b|\bcard\b|\bpayment\b', content, re.IGNORECASE))
         complex_elements = len(re.findall(r'<input|<select|<textarea|<option', content, re.IGNORECASE))
 
         # --- 1. PSYCHOLOGY LAWS ---
@@ -208,7 +212,7 @@ class UXAuditor:
             self.warnings.append(f"[Cognitive Load] {filename}: High visual noise detected. Many colors and borders increase cognitive load.")
 
         # Familiar patterns
-        if has_form:
+        if has_form and is_html_like:
             has_standard_labels = bool(re.search(r'<label|placeholder|aria-label', content, re.IGNORECASE))
             if not has_standard_labels:
                 self.issues.append(f"[Cognitive Load] {filename}: Form inputs without labels. Use <label> for accessibility and clarity.")

@@ -36,6 +36,8 @@ class Colors:
     RED = '\033[91m'
     ENDC = '\033[0m'
     BOLD = '\033[1m'
+    FAIL = '\033[91m' # Same as RED
+    WARNING = '\033[93m' # Same as YELLOW
 
 def print_header(text: str):
     print(f"\n{Colors.BOLD}{Colors.CYAN}{'='*60}{Colors.ENDC}")
@@ -43,16 +45,19 @@ def print_header(text: str):
     print(f"{Colors.BOLD}{Colors.CYAN}{'='*60}{Colors.ENDC}\n")
 
 def print_step(text: str):
-    print(f"{Colors.BOLD}{Colors.BLUE}🔄 {text}{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.BLUE}[RUNNING] {text}{Colors.ENDC}")
 
 def print_success(text: str):
-    print(f"{Colors.GREEN}✅ {text}{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.GREEN}[PASSED] {text}{Colors.ENDC}")
 
 def print_warning(text: str):
-    print(f"{Colors.YELLOW}⚠️  {text}{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.WARNING}[WARN] {text}{Colors.ENDC}")
 
 def print_error(text: str):
-    print(f"{Colors.RED}❌ {text}{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.FAIL}[FAILED] {text}{Colors.ENDC}")
+
+def print_skip(text: str):
+    print(f"{Colors.BOLD}{Colors.HEADER}[SKIP] {text}{Colors.ENDC}")
 
 # Define priority-ordered checks
 CORE_CHECKS = [
@@ -127,7 +132,7 @@ def run_script(name: str, script_path: Path, project_path: str, url: Optional[st
 
 def print_summary(results: List[dict]):
     """Print final summary report"""
-    print_header("📊 CHECKLIST SUMMARY")
+    print_header("CHECKLIST SUMMARY")
     
     passed_count = sum(1 for r in results if r["passed"] and not r.get("skipped"))
     failed_count = sum(1 for r in results if not r["passed"] and not r.get("skipped"))
@@ -181,14 +186,14 @@ Examples:
         print_error(f"Project path does not exist: {project_path}")
         sys.exit(1)
     
-    print_header("🚀 ANTIGRAVITY KIT - MASTER CHECKLIST")
+    print_header("ANTIGRAVITY KIT - MASTER CHECKLIST")
     print(f"Project: {project_path}")
     print(f"URL: {args.url if args.url else 'Not provided (performance checks skipped)'}")
     
     results = []
     
     # Run core checks
-    print_header("📋 CORE CHECKS")
+    print_header("CORE CHECKS")
     for name, script_path, required in CORE_CHECKS:
         script = project_path / script_path
         result = run_script(name, script, str(project_path))
@@ -202,7 +207,7 @@ Examples:
     
     # Run performance checks if URL provided
     if args.url and not args.skip_performance:
-        print_header("⚡ PERFORMANCE CHECKS")
+        print_header("PERFORMANCE CHECKS")
         for name, script_path, required in PERFORMANCE_CHECKS:
             script = project_path / script_path
             result = run_script(name, script, str(project_path), args.url)

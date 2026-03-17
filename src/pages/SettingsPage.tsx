@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import { Bell, User, Calendar, MessageSquare, Mail, Smartphone, ArrowLeft } from 'lucide-react'
+import { Bell, User, Calendar, ArrowLeft, Globe } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export default function SettingsPage() {
@@ -20,9 +20,8 @@ export default function SettingsPage() {
                 </div>
 
                 <nav className="flex-1 px-4 space-y-6 overflow-auto">
-                    {/* Account Section */}
+                    {/* Main Settings Section */}
                     <div className="space-y-1">
-                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 mb-2">Account</p>
                         <NavLink
                             to="/settings/profile"
                             className={({ isActive }) =>
@@ -51,13 +50,9 @@ export default function SettingsPage() {
                             <Bell className="h-4 w-4" />
                             Notifications
                         </NavLink>
-                    </div>
 
-                    {/* Channels Section */}
-                    <div className="space-y-1">
-                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 mb-2">Channels</p>
                         <NavLink
-                            to="/settings/whatsapp"
+                            to="/settings/channels"
                             className={({ isActive }) =>
                                 cn(
                                     "flex items-center gap-3 px-3 py-3 md:py-2 rounded-md transition-all duration-200 text-sm font-medium",
@@ -67,19 +62,9 @@ export default function SettingsPage() {
                                 )
                             }
                         >
-                            <MessageSquare className="h-4 w-4" />
-                            WhatsApp
+                            <Globe className="h-4 w-4" />
+                            Channels
                         </NavLink>
-
-                        {/* Coming Soon Items */}
-                        <div className="flex items-center gap-3 px-3 py-3 md:py-2 text-muted-foreground/40 cursor-not-allowed select-none text-sm">
-                            <Mail className="h-4 w-4" />
-                            Email
-                        </div>
-                        <div className="flex items-center gap-3 px-3 py-3 md:py-2 text-muted-foreground/40 cursor-not-allowed select-none text-sm">
-                            <Smartphone className="h-4 w-4" />
-                            SMS
-                        </div>
                     </div>
 
                     {/* Integrations Section */}

@@ -14,6 +14,7 @@ Supports:
 import subprocess
 import sys
 import json
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -45,7 +46,7 @@ def detect_test_framework(project_path: Path) -> dict:
             # Check for test script
             if "test" in scripts:
                 result["framework"] = "npm test"
-                result["cmd"] = ["npm", "test"]
+                result["cmd"] = ["npm", "test", "--", "--run"]
                 
                 # Try to detect specific framework for coverage
                 if "vitest" in deps:
@@ -95,7 +96,8 @@ def run_tests(cmd: list, cwd: Path) -> dict:
             text=True,
             encoding='utf-8',
             errors='replace',
-            timeout=300  # 5 min timeout for tests
+            timeout=300,  # 5 min timeout for tests
+            shell=os.name == 'nt'
         )
         
         result["output"] = proc.stdout[:3000] if proc.stdout else ""

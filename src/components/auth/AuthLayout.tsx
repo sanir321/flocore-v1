@@ -1,5 +1,7 @@
 import { Outlet, Navigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { motion } from 'framer-motion'
+import { MetalRingCluster } from '@/components/ui/MetalRingCluster'
 
 export default function AuthLayout() {
     const { session, loading } = useAuth()
@@ -28,7 +30,7 @@ export default function AuthLayout() {
                 </div>
             </div>
 
-            {/* Right: Visual Area (Conduit Style) */}
+            {/* Right: Visual Area (Meta Style) */}
             <div className="hidden lg:block relative overflow-hidden bg-zinc-950 border-l border-white/5">
                 {/* Metallic Gradient Mesh */}
                 <div className="absolute inset-0 bg-[#0A0A0A]">
@@ -36,22 +38,32 @@ export default function AuthLayout() {
                     <div className="absolute inset-0 bg-[linear-gradient(to_bottom_right,_var(--tw-gradient-stops))] from-zinc-900/30 via-transparent to-transparent" />
                 </div>
 
-                {/* Ring Visuals matching reference */}
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[40%]">
-                    {/* Outer large metallic ring */}
-                    <div className="w-[800px] h-[800px] rounded-full border-[60px] border-zinc-800/30 blur-2xl relative">
-                        <div className="absolute inset-0 rounded-full border-[1px] border-white/5" />
-                    </div>
-                    {/* Sharp inner ring */}
-                    <div className="absolute inset-0 w-[800px] h-[800px] rounded-full border border-white/10 opacity-40 transform scale-90" />
+                {/* Animated Metal Ring Cluster */}
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[35%] pointer-events-none">
+                    <MetalRingCluster />
                 </div>
 
                 {/* Text Content */}
                 <div className="absolute bottom-12 left-12 z-10 p-6 max-w-md">
-                    <p className="text-2xl font-light tracking-wide text-white/90 mb-2">Automate your workforce.</p>
-                    <p className="text-zinc-500">Deploy AI agents that work 24/7.</p>
+                    <motion.p 
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.8, delay: 0.5 }}
+                        className="text-2xl font-light tracking-wide text-white/90 mb-2"
+                    >
+                        Automate your workforce.
+                    </motion.p>
+                    <motion.p 
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.8, delay: 0.7 }}
+                        className="text-zinc-500"
+                    >
+                        Deploy AI agents that work 24/7.
+                    </motion.p>
                 </div>
             </div>
         </div>
     )
 }
+

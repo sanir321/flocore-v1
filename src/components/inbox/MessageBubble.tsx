@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 
 export interface Message {
     id: string
+    conversation_id: string
     content: string
     sender: 'human' | 'ai' | 'customer' | 'system' | string
     created_at: string | null

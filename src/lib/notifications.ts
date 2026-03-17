@@ -34,7 +34,6 @@ export function getNotificationPermission(): NotificationPermission | 'unsupport
  */
 export async function requestNotificationPermission(): Promise<boolean> {
     if (!isNotificationSupported()) {
-        console.warn('Browser notifications not supported')
         return false
     }
 
@@ -45,7 +44,6 @@ export async function requestNotificationPermission(): Promise<boolean> {
 
     // Already denied - can't request again
     if (Notification.permission === 'denied') {
-        console.warn('Notification permission was denied previously')
         return false
     }
 
@@ -54,7 +52,6 @@ export async function requestNotificationPermission(): Promise<boolean> {
         const permission = await Notification.requestPermission()
         return permission === 'granted'
     } catch (error) {
-        console.error('Error requesting notification permission:', error)
         return false
     }
 }
@@ -64,12 +61,10 @@ export async function requestNotificationPermission(): Promise<boolean> {
  */
 export function sendNotification(options: NotificationOptions): Notification | null {
     if (!isNotificationSupported()) {
-        console.warn('Browser notifications not supported')
         return null
     }
 
     if (Notification.permission !== 'granted') {
-        console.warn('Notification permission not granted')
         return null
     }
 
@@ -99,7 +94,6 @@ export function sendNotification(options: NotificationOptions): Notification | n
 
         return notification
     } catch (error) {
-        console.error('Error sending notification:', error)
         return null
     }
 }

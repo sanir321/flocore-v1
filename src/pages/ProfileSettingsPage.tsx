@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useWorkspace } from '@/hooks/queries/useWorkspace'
+import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,41 +23,24 @@ interface Workspace {
 }
 
 export default function ProfileSettingsPage() {
+    const { data: workspaceData, isLoading } = useWorkspace()
     const [user, setUser] = useState<UserProfile | null>(null)
     const [workspace, setWorkspace] = useState<Workspace | null>(null)
-    const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [copiedId, setCopiedId] = useState<string | null>(null)
     const { toast } = useToast()
+    const queryClient = useQueryClient()
 
     useEffect(() => {
-        const fetchData = async () => {
-            const { data: { user: authUser } } = await supabase.auth.getUser()
-            if (!authUser) {
-                setLoading(false)
-                return
-            }
-
+        if (workspaceData) {
             setUser({
-                email: authUser.email || '',
-                id: authUser.id
+                id: (workspaceData.user as any).id,
+                email: (workspaceData.user as any).email || ''
             })
-
-            const { data: workspaceData } = await supabase
-                .from('workspaces')
-                .select('*')
-                .eq('owner_id', authUser.id)
-                .single()
-
-            if (workspaceData) {
-                setWorkspace(workspaceData as unknown as Workspace)
-            }
-
-            setLoading(false)
+            setWorkspace(workspaceData as unknown as Workspace)
         }
+    }, [workspaceData])
 
-        fetchData()
-    }, [])
 
     const handleSave = async () => {
         if (!workspace) return
@@ -68,11 +53,12 @@ export default function ProfileSettingsPage() {
                     name: workspace.name,
                     industry: workspace.industry,
                     timezone: workspace.timezone
-                })
+                } as any)
                 .eq('id', workspace.id)
 
             if (error) throw error
 
+            queryClient.invalidateQueries({ queryKey: ['workspace'] })
             toast({ title: "Success", description: "Profile details updated successfully." })
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" })
@@ -88,13 +74,14 @@ export default function ProfileSettingsPage() {
         toast({ title: "Copied", description: `${label} copied to clipboard.` })
     }
 
-    if (loading) {
+    if (isLoading) {
         return (
             <div className="flex h-64 items-center justify-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
         )
     }
+
 
     return (
         <div className="space-y-10 max-w-4xl">
@@ -141,6 +128,7 @@ export default function ProfileSettingsPage() {
                                 size="icon"
                                 onClick={() => copyToClipboard(user?.id || '', 'User ID')}
                                 className="flex-none shrink-0 border-slate-200 hover:bg-slate-50"
+                                aria-label="Copy User ID"
                             >
                                 {copiedId === 'User ID' ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4 text-muted-foreground" />}
                             </Button>
@@ -220,6 +208,7 @@ export default function ProfileSettingsPage() {
                                     size="icon"
                                     onClick={() => copyToClipboard(workspace.id, 'Workspace ID')}
                                     className="flex-none shrink-0 border-slate-200 hover:bg-slate-50"
+                                    aria-label="Copy Workspace ID"
                                 >
                                     {copiedId === 'Workspace ID' ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4 text-muted-foreground" />}
                                 </Button>

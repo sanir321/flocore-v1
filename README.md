@@ -14,7 +14,7 @@ FlowCore AI acts as the "Operating System" for your AI workforce. It allows busi
 #### 1. Agent Hub
 The central command center for managing AI personnel.
 -   **Chat Agents:** Text-based agents powered by Llama 3.3 / Mixtral for instant customer support.
--   **Voice Agents:** Real-time bi-directional voice capabilities (Deepgram integrated).
+-   **Voice Agents (Coming Soon):** Real-time bi-directional voice capabilities.
 -   **Tools Configuration:** Granular control over what an agent can do (Book Appointments, Check Availability).
 
 #### 2. Unified Omni-Channel Inbox
@@ -22,7 +22,7 @@ A single interface for human-AI collaboration.
 -   **Live Monitoring:** Watch AI conversations in real-time.
 -   **Smart Handoff:** "Take Over" button instantly pauses AI and allows human intervention.
 -   **Escalation System:** Automated detection of frustrated customers with "Escalated" tagging and staff notifications.
--   **WhatsApp Integration:** Native Two-Way integration via Twilio/Gupshup.
+-   **WhatsApp Integration:** Native Two-Way integration via Meta WhatsApp Cloud API.
 
 #### 3. Knowledge Base (RAG)
 Empower agents with your business data.
@@ -37,18 +37,18 @@ Designed for security, scalability, and performance.
 | Component | Technology | Description |
 | :--- | :--- | :--- |
 | **Frontend** | React + Vite | Fast, responsive Single Page Application (SPA). |
-| **Styling** | Tailwind CSS | Modern, clean UI adaptable to enterprise branding. |
+| **Styling** | Vanilla CSS | Modern, premium UI utilizing native CSS features. |
 | **Backend** | Supabase | Postgres Database, Auth, and Realtime Subscriptions. |
-| **Compute** | Edge Functions | Low-latency serverless functions for AI logic (`process-message`). |
-| **AI Inference** | Groq / OpenAI | Ultra-fast token generation for near-human latency. |
-| **Telephony** | Twilio / Deepgram | Enterprise-grade SMS/WhatsApp and Voice streaming. |
+| **Compute** | Edge Functions | Low-latency serverless functions for AI logic and webhooks. |
+| **AI Inference** | Groq / Ollama | Ultra-fast token generation for near-human latency. |
+| **Messaging** | Meta WhatsApp | Official WhatsApp Cloud API integration. |
 
 ## 📦 Deployment & Setup
 
 ### Prerequisites
 -   Node.js 18+
 -   Supabase Project
--   Twilio Account (for WhatsApp/Voice)
+-   Meta WhatsApp Business Account (for official API)
 -   Groq API Key (for LLM inference)
 
 ### Environment Configuration
@@ -59,8 +59,9 @@ VITE_SUPABASE_URL=your_project_url
 VITE_SUPABASE_ANON_KEY=your_anon_key
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 GROQ_API_KEY=your_groq_key
-TWILIO_ACCOUNT_SID=your_sid
-TWILIO_AUTH_TOKEN=your_token
+META_WHATSAPP_TOKEN=your_meta_access_token
+META_PHONE_NUMBER_ID=your_phone_id
+META_WEBHOOK_VERIFY_TOKEN=your_custom_verify_token
 ```
 
 ### Installation

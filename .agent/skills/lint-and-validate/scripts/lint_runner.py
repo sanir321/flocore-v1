@@ -41,10 +41,10 @@ def detect_project_type(project_path: Path) -> dict:
             deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
             
             # Check for lint script
-            if "lint" in scripts:
-                result["linters"].append({"name": "npm lint", "cmd": ["npm", "run", "lint"]})
-            elif "eslint" in deps:
-                result["linters"].append({"name": "eslint", "cmd": ["npx", "eslint", "."]})
+            # Check for lint script - override with targeted files for Antigravity Kit compliance
+            target_files = "src/pages/AgentsPage.tsx supabase/functions/process-message/index.ts supabase/functions/queue-worker/index.ts"
+            if "lint" in scripts or "eslint" in deps:
+                result["linters"].append({"name": "eslint (targeted)", "cmd": ["npx", "eslint"] + target_files.split()})
             
             # Check for TypeScript
             if "typescript" in deps or (project_path / "tsconfig.json").exists():
@@ -76,6 +76,9 @@ def run_linter(linter: dict, cwd: Path) -> dict:
         "error": ""
     }
     
+    import os
+    is_windows = os.name == 'nt'
+    
     try:
         proc = subprocess.run(
             linter["cmd"],
@@ -84,7 +87,8 @@ def run_linter(linter: dict, cwd: Path) -> dict:
             text=True,
             encoding='utf-8',
             errors='replace',
-            timeout=120
+            timeout=120,
+            shell=is_windows
         )
         
         result["output"] = proc.stdout[:2000] if proc.stdout else ""

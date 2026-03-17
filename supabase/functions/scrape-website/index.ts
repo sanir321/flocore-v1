@@ -1,7 +1,7 @@
 
 
 // @ts-nocheck
-import { load } from "cheerio"
+import * as cheerio from "npm:cheerio"
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -122,7 +122,7 @@ Deno.serve(async (req: Request) => {
         }
 
         const html = await response.text()
-        const $ = load(html)
+        const $ = cheerio.load(html)
 
         // Remove scripts, styles, and other non-content elements
         $('script').remove()

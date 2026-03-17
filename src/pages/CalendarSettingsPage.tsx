@@ -1,4 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
+import { DEFAULT_SUPABASE_URL } from '@/lib/constants'
+import { useWorkspace } from '@/hooks/queries/useWorkspace'
+import { useCalendarConnection } from '@/hooks/queries/useCalendarConnection'
+import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,14 +19,19 @@ interface CalendarConnection {
 }
 
 export default function CalendarSettingsPage() {
-    const [connection, setConnection] = useState<CalendarConnection | null>(null)
-    const [loading, setLoading] = useState(true)
-    const [workspaceId, setWorkspaceId] = useState<string | null>(null)
+    const { data: workspace, isLoading: workspaceLoading } = useWorkspace()
+    const workspaceId = workspace?.id
+    const { data: connectionData, isLoading: connectionLoading } = useCalendarConnection(workspaceId)
+    
     const { toast } = useToast()
     const [searchParams] = useSearchParams()
+    const queryClient = useQueryClient()
 
+    const connection = connectionData as unknown as CalendarConnection | null
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL
     const oauthUrl = workspaceId
-        ? `https://wfseydnisxyizuczfpey.supabase.co/functions/v1/calendar-oauth?workspace_id=${workspaceId}`
+        ? `${supabaseUrl}/functions/v1/calendar-oauth?workspace_id=${workspaceId}`
         : ''
 
     useEffect(() => {
@@ -35,38 +44,6 @@ export default function CalendarSettingsPage() {
         }
     }, [searchParams, toast])
 
-    useEffect(() => {
-        const fetchConnection = async () => {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) return
-
-            const { data: workspace } = await supabase
-                .from('workspaces')
-                .select('id')
-                .eq('owner_id', user.id)
-                .single()
-
-            if (!workspace) {
-                setLoading(false)
-                return
-            }
-
-            setWorkspaceId(workspace.id)
-
-            const { data } = await supabase
-                .from('calendar_connections')
-                .select('*')
-                .eq('workspace_id', workspace.id)
-                .single()
-
-            if (data) {
-                setConnection(data as unknown as CalendarConnection)
-            }
-            setLoading(false)
-        }
-
-        fetchConnection()
-    }, [])
 
     const handleDisconnect = async () => {
         if (!workspaceId) return
@@ -76,20 +53,21 @@ export default function CalendarSettingsPage() {
             .update({ connected: false, access_token: null, refresh_token: null })
             .eq('workspace_id', workspaceId)
 
-        setConnection(prev => prev ? { ...prev, connected: false } : null)
+        queryClient.invalidateQueries({ queryKey: ['calendar_connection', workspaceId] })
         toast({
             title: "Disconnected",
             description: "Google Calendar has been disconnected."
         })
     }
 
-    if (loading) {
+    if (workspaceLoading || connectionLoading) {
         return (
             <div className="flex h-64 items-center justify-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
         )
     }
+
 
     return (
         <div className="space-y-10 max-w-4xl">

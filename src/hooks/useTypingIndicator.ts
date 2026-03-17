@@ -10,6 +10,13 @@ export interface TypingUser {
 export const useTypingIndicator = (conversationId: string | undefined) => {
     const [typingUsers, setTypingUsers] = useState<Map<string, TypingUser>>(new Map())
     const typingChannelRef = useRef<any>(null)
+    const [prevConversationId, setPrevConversationId] = useState<string | undefined>(conversationId)
+
+    // Reset typing users when conversationId changes
+    if (conversationId !== prevConversationId) {
+        setTypingUsers(new Map())
+        setPrevConversationId(conversationId)
+    }
 
     useEffect(() => {
         if (!conversationId) {
@@ -17,7 +24,6 @@ export const useTypingIndicator = (conversationId: string | undefined) => {
                 supabase.removeChannel(typingChannelRef.current)
                 typingChannelRef.current = null
             }
-            setTypingUsers(new Map())
             return
         }
 
@@ -82,10 +88,19 @@ export const useTypingIndicator = (conversationId: string | undefined) => {
         })
     }
 
+    const getTypingMessage = () => {
+        const users = Array.from(typingUsers.values())
+        if (users.length === 0) return ''
+        if (users.length === 1) return `${users[0].name} is typing...`
+        if (users.length === 2) return `${users[0].name} and ${users[1].name} are typing...`
+        return `${users[0].name} and ${users.length - 1} others are typing...`
+    }
+
     return {
         typingUsers,
         sendTyping,
         broadcastReadReceipt,
-        typingChannelRef // Exporting ref if needed for attaching other listeners (like read receipts)
+        getTypingMessage,
+        typingChannelRef
     }
 }

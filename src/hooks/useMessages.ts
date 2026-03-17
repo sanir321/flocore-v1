@@ -6,6 +6,13 @@ import { sendMessageNotification } from '@/lib/notifications'
 export const useMessages = (conversationId: string | undefined) => {
     const [messages, setMessages] = useState<Map<string, Message>>(new Map())
     const [isAiThinking, setIsAiThinking] = useState(false)
+    const [prevConversationId, setPrevConversationId] = useState<string | undefined>(conversationId)
+
+    // Clear messages immediately when conversation ID changes to avoid "ghost" messages
+    if (conversationId !== prevConversationId) {
+        setMessages(new Map())
+        setPrevConversationId(conversationId)
+    }
 
     // We reuse the typing hook mainly to get access to the shared channel if needed, 
     // or we can invoke broadcasting text from here.
@@ -13,7 +20,6 @@ export const useMessages = (conversationId: string | undefined) => {
     // and rely on hook arguments for outside dependencies.
 
     useEffect(() => {
-        setMessages(new Map()) // Clear immediately to avoid "ghost" messages from previous chat
         if (!conversationId) return
 
         const fetchMessages = async () => {
@@ -24,7 +30,7 @@ export const useMessages = (conversationId: string | undefined) => {
                 .order('created_at', { ascending: true })
 
             if (error) {
-                console.error('Error fetching messages:', error)
+                // Silently ignore or handle error
             } else {
                 const messageMap = new Map<string, Message>()
                 data.forEach((m: any) => messageMap.set(m.id, m))
@@ -102,10 +108,11 @@ export const useMessages = (conversationId: string | undefined) => {
         const tempId = `temp_${Date.now()}`
         const tempMsg: Message = {
             id: tempId,
+            conversation_id: (conversationId || '') as string,
             content,
-            sender: 'human',
+            sender: 'agent',
             created_at: new Date().toISOString(),
-            status: 'sending'
+            status: 'sending',
         }
 
         setMessages(prev => {
